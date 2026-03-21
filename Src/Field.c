@@ -1,154 +1,64 @@
 /***********************************************************************
- *
- * SPACE TRADER 1.2.0
- *
- * Field.c
- *
- * Copyright (C) 2000-2002 Pieter Spronck, All Rights Reserved
- *
- * Additional coding by Sam Anderson (rulez2@home.com)
- * Additional coding by Samuel Goldstein (palm@fogbound.net)
- *
- * Some code of Matt Lee's Dope Wars program has been used.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
- * 
- * You can contact the author at space_trader@hotmail.com
- *
- * For those who are familiar with the classic game Elite: many of the
- * ideas in Space Trader are heavily inspired by Elite.
- *
- **********************************************************************/
-
-// *************************************************************************
-// Field.c - Functions Include:
-// Handle SetField( FormPtr frm, int Nr, char* Value, int Size, Boolean Focus )
-// void GetField( FormPtr frm, int Nr, char* Value, Handle AmountH )
-// void SetCheckBox( FormPtr frm, int Nr, Boolean Value )
-// Boolean GetCheckBox( FormPtr frm, int Nr )
-//
-// Modifications:
-// mm/dd/yy - description - author
-// *************************************************************************
-
+ * SPACE TRADER 1.2.0 - Field.c
+ * Genesis port: field operations rerouted to ui_field_buf / label table.
+ ***********************************************************************/
 #include "external.h"
+#include "ui.h"
 
-// *************************************************************************
-// Set Field
-// *************************************************************************
-Handle SetField( FormPtr frm, int Nr, char* Value, int Size, Boolean Focus )
+/* On Genesis there is no real widget system.
+ * SetField stores the initial value in a static buffer.
+ * GetField reads back from ui_field_buf (which GEN_FrmDoDialog populates
+ * after the user enters a number via the spinner). */
+
+static char _field_storage[128];
+
+void* SetField( FormPtr frm, int Nr, char* Value, int Size, Boolean Focus )
 {
-	Word objIndex;
-	CharPtr AmountP;
-	Handle AmountH;
-	
-	objIndex = FrmGetObjectIndex( frm, Nr );
-	AmountH = MemHandleNew( Size );
-	AmountP = MemHandleLock( AmountH );
-	StrCopy( AmountP, Value );
-	MemPtrUnlock( AmountP );
-	FldSetTextHandle( FrmGetObjectPtr( frm, objIndex ), AmountH );
-	if (Focus)
-		FrmSetFocus( frm, objIndex );
-	
-	return AmountH;
+    (void)frm; (void)Nr; (void)Size; (void)Focus;
+    strncpy(_field_storage, Value, sizeof(_field_storage) - 1);
+    _field_storage[sizeof(_field_storage)-1] = '\0';
+    /* Copy into ui_field_buf so GEN_FldGetTextPtr returns it */
+    strncpy(ui_field_buf, Value, sizeof(ui_field_buf) - 1);
+    ui_field_buf[sizeof(ui_field_buf)-1] = '\0';
+    return (void*)_field_storage;
 }
 
-
-// *************************************************************************
-// Get Field
-// *************************************************************************
-void GetField( FormPtr frm, int Nr, char* Value, Handle AmountH )
+void GetField( FormPtr frm, int Nr, char* Value, void* AmountH )
 {
-	Word objIndex;
-	CharPtr AmountP;
-
-	objIndex = FrmGetObjectIndex( frm, Nr );
-	FldSetTextHandle( FrmGetObjectPtr( frm, objIndex ), 0 );
-	AmountP = MemHandleLock( AmountH );
-	StrCopy( Value, AmountP );
-	MemPtrUnlock( AmountP );
-	MemHandleFree( AmountH );
+    (void)frm; (void)Nr; (void)AmountH;
+    /* The spinner in GEN_FrmDoDialog wrote its result into ui_field_buf */
+    strncpy(Value, ui_field_buf, 127);
+    Value[127] = '\0';
+    /* Reset the buffer */
+    ui_field_buf[0] = '\0';
 }
 
-// *************************************************************************
-// Set Trigger List value
-// *************************************************************************
 void SetTriggerList( FormPtr frm, int Nr, int Index )
 {
-	Word objIndex;
-	ControlPtr cp;
-	
-	objIndex = FrmGetObjectIndex( frm, Nr );
-	cp = (ControlPtr)FrmGetObjectPtr( frm, objIndex );
-	LstSetSelection( cp, Index );
+    (void)frm;
+    GEN_LstSetSelection(Nr, Index);
 }
 
-// *************************************************************************
-// Set Control Label
-// *************************************************************************
-void SetControlLabel( FormPtr frm, int Nr, Char * Label )
+void SetControlLabel( FormPtr frm, int Nr, char* Label )
 {
-	Word objIndex;
-	ControlPtr cp;
-	
-	objIndex = FrmGetObjectIndex( frm, Nr );
-	cp = (ControlPtr)FrmGetObjectPtr( frm, objIndex );
-	CtlSetLabel( cp, Label );
+    (void)frm; (void)Nr;
+    GEN_CtlSetLabel((void*)(intptr_t)Nr, Label);
 }
 
-// *************************************************************************
-// Get Trigger List value
-// *************************************************************************
-int GetTriggerList( FormPtr frm, int Nr)
+int GetTriggerList( FormPtr frm, int Nr )
 {
-	Word objIndex;
-	ControlPtr cp;
-	
-	objIndex = FrmGetObjectIndex( frm, Nr );
-	cp = (ControlPtr)FrmGetObjectPtr( frm, objIndex );
-	return LstGetSelection( cp );
+    (void)frm;
+    return GEN_LstGetSelection(Nr);
 }
 
-
-// *************************************************************************
-// Set Checkbox value
-// *************************************************************************
 void SetCheckBox( FormPtr frm, int Nr, Boolean Value )
 {
-	Word objIndex;
-	ControlPtr cp;
-	
-	objIndex = FrmGetObjectIndex( frm, Nr );
-	cp = (ControlPtr)FrmGetObjectPtr( frm, objIndex );
-	CtlSetValue( cp, (Value ? 1 : 0) );
+    (void)frm;
+    GEN_CtlSetValue(Nr, Value ? 1 : 0);
 }
 
-
-// *************************************************************************
-// Get Checkbox value
-// *************************************************************************
 Boolean GetCheckBox( FormPtr frm, int Nr )
 {
-	Word objIndex;
-	ControlPtr cp;
-
-	objIndex = FrmGetObjectIndex( frm, Nr );
-	cp = (ControlPtr)FrmGetObjectPtr( frm, objIndex );
-	if (CtlGetValue( cp ) == 0)
-		return false;
-	else
-		return true;
+    (void)frm;
+    return GEN_CtlGetValue(Nr) != 0;
 }

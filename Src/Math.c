@@ -41,7 +41,7 @@
 // *************************************************************************
 // Temporary implementation of square root
 // *************************************************************************
-int sqrt( int a )
+static int ST_sqrt( int a )
 {
 	int i;
 	
@@ -68,7 +68,7 @@ long SqrDistance( SOLARSYSTEM a, SOLARSYSTEM b )
 // *************************************************************************
 long RealDistance( SOLARSYSTEM a, SOLARSYSTEM b )
 {
-	return (sqrt( SqrDistance( a, b ) ));
+	return (ST_sqrt( SqrDistance( a, b ) ));
 }
 
 

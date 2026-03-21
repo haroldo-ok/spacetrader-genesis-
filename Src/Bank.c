@@ -137,7 +137,7 @@ Boolean BankFormHandleEvent(EventPtr eventP)
     FormPtr frmP;
 	int d;
 	long Amount;
-	Handle AmountH;
+	void* AmountH;
 
 	switch (eventP->eType) 
 	{
@@ -159,7 +159,7 @@ Boolean BankFormHandleEvent(EventPtr eventP)
 			
 				frmP = FrmInitForm( GetLoanForm );
 	
-				AmountH = (Handle) SetField( frmP, GetLoanGetLoanField, "", 6, true );
+				AmountH = (void*) SetField( frmP, GetLoanGetLoanField, "", 6, true );
 
 				StrCopy( SBuf, "You can borrow up to " );
 				StrIToA( SBuf2, (MaxLoan() - Debt) );
@@ -193,7 +193,7 @@ Boolean BankFormHandleEvent(EventPtr eventP)
 			
 				frmP = FrmInitForm( PayBackForm );
 	
-				AmountH = (Handle) SetField( frmP, PayBackPayBackField, "", 6, true );
+				AmountH = (void*) SetField( frmP, PayBackPayBackField, "", 6, true );
 	
 				StrCopy( SBuf, "You have a debt of " );
 				StrIToA( SBuf2, Debt );

@@ -109,7 +109,7 @@ static int GetForHire( void )
 // *************************************************************************
 // Drawing the Personnel Roster screen
 // *************************************************************************
-static void DrawPersonnelRoster( void )
+void DrawPersonnelRoster( void )
 {
 	FormPtr frmP;
 	RectangleType a;

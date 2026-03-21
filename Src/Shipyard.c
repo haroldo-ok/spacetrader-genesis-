@@ -55,11 +55,11 @@ static int GetAmountForRepairs( void )
 {
 	FormPtr frm;
 	int d, Amount;
-	Handle AmountH;
+	void* AmountH;
 
 	frm = FrmInitForm( BuyRepairsForm );
 	
-	AmountH = (Handle) SetField( frm, BuyRepairsForRepairsField, "", 5, true );
+	AmountH = (void*) SetField( frm, BuyRepairsForRepairsField, "", 5, true );
 	
 	d = FrmDoDialog( frm );
 
@@ -86,11 +86,11 @@ static int GetAmountForFuel( void )
 {
 	FormPtr frm;
 	int d, Amount;
-	Handle AmountH;
+	void* AmountH;
 
 	frm = FrmInitForm( BuyFuelForm );
 	
-	AmountH = (Handle) SetField( frm, BuyFuelForFuelField, "", 4, true );
+	AmountH = (void*) SetField( frm, BuyFuelForFuelField, "", 4, true );
 	
 	d = FrmDoDialog( frm );
 

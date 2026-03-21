@@ -125,7 +125,7 @@ Boolean CommanderStatusFormHandleEvent(EventPtr eventP)
     Boolean handled = false;
     static FormPtr frm;
     static int i;
-	static Handle AmountH[4];
+	static void* AmountH[4];
 
 	switch (eventP->eType) 
 	{
