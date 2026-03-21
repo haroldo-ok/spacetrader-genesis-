@@ -1404,7 +1404,7 @@ Boolean EncounterFormHandleEvent ( EventPtr eventP )
 	long Fine;
 	long Bribe;
  	int d, i, j, m, Bays, TotalCargo;
-	Handle QuantityH;
+	void* QuantityH;
 	long Blackmail;
 	Boolean RedrawButtons = false;
 #ifdef HWATTACK
@@ -1691,7 +1691,7 @@ Boolean EncounterFormHandleEvent ( EventPtr eventP )
 					setLabelText( frm, TradeInOrbitAveragePriceLabel, SBuf );
 					setLabelText( frm, TradeInOrbitHowManyLabel, "How many do you wish to sell?");
 
-					QuantityH = (Handle) SetField( frm, TradeInOrbitQuantityField, "", 5, true );
+					QuantityH = (void*) SetField( frm, TradeInOrbitQuantityField, "", 5, true );
 					d = FrmDoDialog(frm);
 					j = 0;
 					if (d == TradeInOrbitOKButton)
@@ -1776,7 +1776,7 @@ Boolean EncounterFormHandleEvent ( EventPtr eventP )
 					setLabelText( frm, TradeInOrbitAveragePriceLabel, SBuf );
 					setLabelText( frm, TradeInOrbitHowManyLabel, "How many do you wish to buy?");
 
-					QuantityH = (Handle) SetField( frm, TradeInOrbitQuantityField, "", 5, true );
+					QuantityH = (void*) SetField( frm, TradeInOrbitQuantityField, "", 5, true );
 					d = FrmDoDialog(frm);
 					j = 0;
 					if (d == TradeInOrbitOKButton)

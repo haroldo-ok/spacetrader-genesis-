@@ -37,7 +37,7 @@
 // *************************************************************************
 // To draw a circle with centre Xs, Ys and radius R.
 // *************************************************************************
-static void DrawCircle( int Xs, int Ys, int R )
+void DrawCircle( int Xs, int Ys, int R )
 {
 	int Xp, Yp, i, Xt, Yt;
 	
@@ -86,7 +86,7 @@ static void DrawCircle( int Xs, int Ys, int R )
 // *************************************************************************
 // Draw the short range chart
 // *************************************************************************
-static void DrawShortRange( int Index )
+void DrawShortRange( int Index )
 {
     FormPtr frmP;
 	RectangleType bounds;
@@ -207,7 +207,7 @@ static void DrawShortRange( int Index )
 // *************************************************************************
 // Draw the galactic chart, with system Index selected.
 // *************************************************************************
-static void DrawGalaxy( int Index )
+void DrawGalaxy( int Index )
 {
     FormPtr frmP;
 	RectangleType bounds;
@@ -441,8 +441,8 @@ Boolean GalacticChartFormHandleEvent(EventPtr eventP)
     Boolean track = false;
 	int i=0, d, delta;
 	static int last = -1;
-	Handle SystemH;
-	Handle SystemH2;
+	void* SystemH;
+	void* SystemH2;
 	FormPtr frm;
 	char FindSystem[NAMELEN+1];
 	Boolean DontLoad;
@@ -570,7 +570,7 @@ Boolean GalacticChartFormHandleEvent(EventPtr eventP)
 			{
 				frm = FrmInitForm( FindSystemForm );
 		
-				SystemH = (Handle) SetField( frm, FindSystemSystemField, "", NAMELEN+1, true );
+				SystemH = (void*) SetField( frm, FindSystemSystemField, "", NAMELEN+1, true );
 		
 				d = FrmDoDialog( frm );
 
@@ -604,9 +604,9 @@ Boolean GalacticChartFormHandleEvent(EventPtr eventP)
 					SetCheckBox( frm, RareCheatGoodTonicCheckbox, VeryRareEncounter & (Byte)ALREADYBOTTLEGOOD );
 					SetCheckBox( frm, RareCheatBadTonicCheckbox, VeryRareEncounter & (Byte)ALREADYBOTTLEOLD );
 					StrIToA( SBuf, ChanceOfVeryRareEncounter );
-					SystemH = (Handle) SetField( frm, RareCheatChancesField, SBuf, 5, true );
+					SystemH = (void*) SetField( frm, RareCheatChancesField, SBuf, 5, true );
 					StrIToA( SBuf, ChanceOfTradeInOrbit );
-					SystemH2 = (Handle) SetField( frm, RareCheatTradeField, SBuf, 5, true );
+					SystemH2 = (void*) SetField( frm, RareCheatTradeField, SBuf, 5, true );
 					
 					d = FrmDoDialog( frm );
 					GetField( frm, RareCheatChancesField, SBuf, SystemH );

@@ -1,3 +1,5 @@
+/* Genesis port: SRAM needed for high scores */
+#include <genesis.h>
 /***********************************************************************
  *
  * SPACE TRADER 1.2.0
@@ -87,7 +89,7 @@
 
 #include "external.h"
 
-static char* HIGHSCORENAME = "SpaceTraderDB";
+/* HIGHSCORENAME defined in palmcompat.h */
 
 // *************************************************************************
 // Money to pay for insurance
@@ -216,72 +218,43 @@ static void InitHighScores (void)
 // Database handling routines for reading the high scores.
 // 04/18/01 - Modified MemMove function usage to use sizeof structure * Max 
 // *************************************************************************
+/* Genesis port: high-score table stored in SRAM at offset after main save */
+#define HSCORE_SRAM_OFFSET  (sizeof(uint16_t) + sizeof(SAVEGAMETYPE))
+#define HSCORE_SRAM_MAGIC   0xBEEF
+
 static DmOpenRef OpenDatabase( void )
 {
-  	UInt index = 0;
-  	VoidHand RecHandle;
-  	VoidPtr RecPointer;
-  	DmOpenRef pmDB;
-	LocalID DbId;
-
-	DbId = DmFindDatabase( 0, HIGHSCORENAME );
-	if (DbId == 0)
-	{
-	   	if (DmCreateDatabase( 0, HIGHSCORENAME, appFileCreator, 'Data', false ) != errNone)
-      		return 0;
-		DbId = DmFindDatabase( 0, HIGHSCORENAME );
-		if (DbId == 0)
-			return 0;
-
-	   	InitHighScores();
-    	
-	   	pmDB = DmOpenDatabase( 0, DbId, dmModeReadWrite );
-   		RecHandle = DmNewRecord( pmDB, &index, sizeof(HIGHSCORE) * MAXHIGHSCORE);
-    	DmWrite( MemHandleLock( RecHandle ), 0, &Hscores, sizeof( HIGHSCORE ) * MAXHIGHSCORE );
-	    MemHandleUnlock( RecHandle );
-   		DmReleaseRecord( pmDB, index, true );
-   		
-   		return pmDB;
-	}
-				
-   	pmDB = DmOpenDatabase( 0, DbId, dmModeReadWrite );
-
-	// Load a saved game status.
-  	RecHandle = DmGetRecord( pmDB, 0 );
-  	RecPointer = MemHandleLock( RecHandle );
-	MemMove( &Hscores, RecPointer, sizeof( HIGHSCORE ) * MAXHIGHSCORE);
-  	MemHandleUnlock( RecHandle );
-  	DmReleaseRecord( pmDB, 0, true );
-
-  	return pmDB;
+    uint16_t magic = 0;
+    SRAM_enable();
+    SRAM_readBuffer(&magic, HSCORE_SRAM_OFFSET, sizeof(magic));
+    if (magic != HSCORE_SRAM_MAGIC)
+    {
+        InitHighScores();
+        /* will be written by SaveStatus */
+    }
+    else
+    {
+        SRAM_readBuffer(&Hscores, HSCORE_SRAM_OFFSET + sizeof(uint16_t),
+                        sizeof(HIGHSCORE) * MAXHIGHSCORE);
+    }
+    SRAM_disable();
+    return (DmOpenRef)1; /* non-NULL sentinel */
 }
 
 // *************************************************************************
 // Save game status information.
 // 04/18/01 - Modified DmWrite function usage to use sizeof structure * Max 
 // *************************************************************************
+/* Genesis port: save high-score table to SRAM */
 static void SaveStatus( DmOpenRef pmDB )
 {
-	Word theAttrs;
-	LocalID DbId;
-    VoidPtr p = MemHandleLock( DmGetRecord( pmDB, 0 ) );
-
-    DmWrite( p, 0, &Hscores, sizeof( HIGHSCORE ) * MAXHIGHSCORE);
-    MemPtrUnlock( p );
-    DmReleaseRecord( pmDB, 0, true );
-
-	DmOpenDatabaseInfo( pmDB, &DbId, NULL, NULL, NULL, NULL );
-
-	// Get the attributes for our database
-	DmDatabaseInfo( 0, DbId, NULL, &theAttrs, NULL, NULL,
-		NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-	
-	// Set the backup flag
-	theAttrs |= dmHdrAttrBackup;
-	
-	// Set the attributes
-	DmSetDatabaseInfo( 0, DbId, NULL, &theAttrs, NULL, NULL,
-		NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+    uint16_t magic = HSCORE_SRAM_MAGIC;
+    (void)pmDB;
+    SRAM_enable();
+    SRAM_writeBuffer(&magic, HSCORE_SRAM_OFFSET, sizeof(magic));
+    SRAM_writeBuffer(&Hscores, HSCORE_SRAM_OFFSET + sizeof(uint16_t),
+                     sizeof(HIGHSCORE) * MAXHIGHSCORE);
+    SRAM_disable();
 }
 
 
@@ -336,7 +309,7 @@ static void EndOfGame( char EndStatus )
 		++i;
 	}
 
-	DmCloseDatabase( pmDB );
+	/* DmCloseDatabase – no-op on Genesis */  (void)pmDB;
 
 	frmP = FrmInitForm( FinalScoreForm );
 
@@ -1249,7 +1222,7 @@ void ViewHighScores( void )
 	DmOpenRef pmDB;
 
 	pmDB = OpenDatabase();
-  	DmCloseDatabase( pmDB );
+  	/* DmCloseDatabase – no-op on Genesis */  (void)pmDB;
 
 	frm = FrmInitForm( HighScoresForm );
 	
@@ -1316,7 +1289,7 @@ void ClearHighScores( void )
 		pmDB = OpenDatabase();
 		InitHighScores();
 		SaveStatus( pmDB );
-    	DmCloseDatabase( pmDB );
+    	/* DmCloseDatabase – no-op on Genesis */  (void)pmDB;
     }
 }
 

@@ -43,7 +43,7 @@ extern Boolean ShipYardFormHandleEvent( EventPtr eventP );
 extern long GetHullStrength( void );
 
 // Math.c
-extern int sqrt( int _a );
+/* sqrt renamed to ST_sqrt to avoid conflict with <math.h> */
 extern long SqrDistance( SOLARSYSTEM _a, SOLARSYSTEM _b );
 extern long RealDistance( SOLARSYSTEM _a, SOLARSYSTEM _b );
 extern UInt16 Rand();
@@ -182,9 +182,9 @@ extern void replaceNewsEvent(int _originalEventFlag, int _replacementEventFlag);
 extern int latestNewsEvent();
 
 // Merchant
-Boolean Savegame( int State ); 
+Boolean SaveGame( int State ); 
 Boolean LoadGame( int State );
-GetBitmapWidth( BitmapPtr BmpPtr );
+int GetBitmapWidth( BitmapPtr BmpPtr );
 int GetBitmapHeight( BitmapPtr BmpPtr );
 
 // Form Event Handlers 

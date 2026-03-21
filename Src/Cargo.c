@@ -84,11 +84,11 @@ static int GetAmountToSell( int Index, Byte Operation  )
 {
 	FormPtr frm;
 	int d, Amount;
-	Handle AmountH;
+	void* AmountH;
 
 	frm = FrmInitForm( AmountToSellForm );
 	
-	AmountH = (Handle) SetField( frm, AmountToSellToSellField, "", 4, true );
+	AmountH = (void*) SetField( frm, AmountToSellToSellField, "", 4, true );
 	
 	if (Operation == SELLCARGO)
 	{
@@ -301,7 +301,7 @@ int GetAmountToBuy( int Index )       // used in Traveler.c also
 	FormPtr frm;
 	long count;
 	int d, Amount;
-	Handle AmountH;
+	void* AmountH;
 
 	if (BuyPrice[Index] <= 0 || CURSYSTEM.Qty[Index] <= 0)
 	{
@@ -311,7 +311,7 @@ int GetAmountToBuy( int Index )       // used in Traveler.c also
 
 	frm = FrmInitForm( AmountToBuyForm );
 	
-	AmountH = (Handle) SetField( frm, AmountToBuyToBuyField, "", 4, true );
+	AmountH = (void*) SetField( frm, AmountToBuyToBuyField, "", 4, true );
 
 	StrCopy( SBuf, "Buy " );
 	StrCat( SBuf, Tradeitem[Index].Name );
@@ -817,11 +817,11 @@ int GetAmountToPlunder( int Index )
 {
 	FormPtr frm;
 	int d, Amount;
-	Handle AmountH;
+	void* AmountH;
 
 	frm = FrmInitForm( AmountToPlunderForm );
 	
-	AmountH = (Handle) SetField( frm, AmountToPlunderToPlunderField, "", 4, true );
+	AmountH = (void*) SetField( frm, AmountToPlunderToPlunderField, "", 4, true );
 	
 	StrCopy( SBuf, "Steal " );
 	StrCat( SBuf, Tradeitem[Index].Name );

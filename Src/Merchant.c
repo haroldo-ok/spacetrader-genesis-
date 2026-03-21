@@ -32,14 +32,9 @@
  *
  **********************************************************************/
 
-// Needed to determine the height and width of a bitmap below OS version 4.0.
-// The direct access is only used below 4.0, otherwise the BmpGetDimensions function is used.
-#ifndef ALLOW_ACCESS_TO_INTERNALS_OF_BITMAPS
-#define ALLOW_ACCESS_TO_INTERNALS_OF_BITMAPS 1
-#endif
-
+/* Genesis port: bitmap internals access not needed (BELOW40 is always false) */
 #include "external.h"
-//#include <scrDriver.h>
+#include "ui.h"
 
 #define ourMinVersion	sysMakeROMVersion(2,0,0,sysROMStageRelease,0)
 void UnpackBooleans(Byte _val, Boolean *_a, Boolean *_b, Boolean *_c, Boolean *_d,
@@ -52,8 +47,8 @@ void UnpackBytes(Byte _val, Byte *_a, Byte *_b);
 #define BELOW35				(romVersion < sysMakeROMVersion( 3, 5, 0, sysROMStageRelease, 0 ))				
 #define BELOW40				(romVersion < sysMakeROMVersion( 4, 0, 0, sysROMStageRelease, 0 ))				
 
-static char* SAVEGAMENAME = "SpaceTraderSave";
-static char* SWITCHGAMENAME = "SpaceTraderSwitch";
+/* SAVEGAMENAME not needed on Genesis (single SRAM slot) */
+/* SWITCHGAMENAME not needed on Genesis */
 
 // *************************************************************************
 // Get width of bitmap
@@ -63,7 +58,7 @@ int GetBitmapWidth( BitmapPtr BmpPtr )
 	Coord W;
 
 	if (BELOW40)
-		return BmpPtr->width;
+		return ((BitmapHeaderType*)BmpPtr)->width;
 	else
 	{
 		BmpGetDimensions( BmpPtr, &W, 0, 0 );
@@ -79,7 +74,7 @@ int GetBitmapHeight( BitmapPtr BmpPtr )
 	Coord H;
 
 	if (BELOW40)
-		return BmpPtr->height;
+		return ((BitmapHeaderType*)BmpPtr)->height;
 	else
 	{
 		BmpGetDimensions( BmpPtr, 0, &H, 0 );
@@ -87,150 +82,27 @@ int GetBitmapHeight( BitmapPtr BmpPtr )
 	}
 }
 // *************************************************************************
-// Determines if the OS supports this resolution
-// *************************************************************************
-static Err GraphicsSupport( void )
-{
-#ifdef BPP1
+/* Genesis port: graphics support check replaced by no-op stubs */
+static Err GraphicsSupport( void )   { return 0; }
+static void EndGraphicsSupport( void ) { }
 
-	return 0;
-
-#else
-	UInt32 depth, reqmode, reqmodedec;
-
-#ifdef BPP8	
-	Boolean color;
-#endif
-
-#ifdef BPP16	
-	Boolean color;
-#endif
-
-	DWord romVersion;
-
-   	// See if we're on in minimum required version of the ROM or later.
-   	FtrGet( sysFtrCreator, sysFtrNumROMVersion, &romVersion );
-
-	if (BELOW35)
-	{
-		FrmAlert( ErrGraphicsSupportAlert );
-		return 1;
-	}
-
-#ifdef BPP16
-	if (BELOW40)
-	{
-		FrmAlert( ErrGraphicsSupport40Alert );
-		return 1;
-	}
-#endif
-
-#ifdef BPP16
-	reqmode = 0x8000;
-	reqmodedec = 16;
-#else
-#ifdef BPP8
-	reqmode = 0x0080;
-	reqmodedec = 8;
-#else // BPP4
-	reqmode = 0x0008;
-	reqmodedec = 4;
-#endif
-#endif
-
-#ifndef BPP4		
-    WinScreenMode( winScreenModeGetSupportsColor, NULL, NULL, NULL, &color );
-	if (!color)
-	{
-		FrmAlert( ErrGraphicsSupportAlert );
-		return 1;
-	}
-#endif
-
-	WinScreenMode( winScreenModeGetSupportedDepths, NULL, NULL, &depth, NULL );
-		
-	if (((reqmode & depth) == 0) || (WinScreenMode( winScreenModeSet, NULL, NULL, &reqmodedec, NULL )))
-	{
-		FrmAlert( ErrGraphicsSupportAlert );
-		return 1;
-	}
-
-   	return( 0 );
-   	
-#endif
-}
-
-/***********************************************************************
- * Resets the screen depth to default values.
- ***********************************************************************/
-static void EndGraphicsSupport( void )
-{
-#ifndef BPP1
-
-	WinScreenMode( winScreenModeSetToDefaults, NULL, NULL, NULL, NULL );
-
-#endif
-
-	return;
-}
 
 // *************************************************************************
 // Determines if the ROM version is compatible
 // *************************************************************************
+/* Genesis port: ROM version check always passes */
 Err RomVersionCompatible(DWord requiredVersion, Word launchFlags)
 {
-	DWord romVersion;
-
-   	// See if we're on in minimum required version of the ROM or later.
-   	FtrGet( sysFtrCreator, sysFtrNumROMVersion, &romVersion );
-   	if (romVersion < requiredVersion)
-    {
-	  	if ((launchFlags & (sysAppLaunchFlagNewGlobals | sysAppLaunchFlagUIApp)) ==
-			(sysAppLaunchFlagNewGlobals | sysAppLaunchFlagUIApp))
-	    {
-		 	FrmAlert (RomIncompatibleAlert);
-		
-		 	// Pilot 1.0 will continuously relaunch this app unless we switch to 
-		 	// another safe one.
-		 	if (romVersion < sysMakeROMVersion( 2,0,0,sysROMStageRelease,0 ))
-		    	AppLaunchWithCommand(sysFileCDefaultApp, sysAppLaunchCmdNormalLaunch, NULL);
-		}
-		
-	   	return (sysErrRomIncompatible);
-	   
-	}
-	
-   	return (0);
+    (void)requiredVersion; (void)launchFlags;
+    return 0;
 }
 
 
 // *************************************************************************
 // Determines if the software is outdated
 // *************************************************************************
-Err OutdatedSoftware( void )
-{
-#ifdef BETATEST				
-   	ULong Secs;
-   	DateTimeType Dt;
-   	DateTimePtr DtP;
-	
-   	Dt.year = 2002;
-   	Dt.month = 12;
-   	Dt.day = 31;
-   	Dt.hour = 0;
-   	Dt.minute = 0;
-   	Dt.second = 0;
-	
-   	DtP = &Dt;
-   	Secs = TimDateTimeToSeconds( DtP );
-   	if (Secs < TimGetSeconds())
-   	{
-	  	FrmAlert( OutdatedSoftwareAlert );
-	  	return( 1 );
- 	}
-#endif	  
-   	return( 0 );
-}
+/* Genesis port: no beta expiry check */
+Err OutdatedSoftware( void ) { return 0; }
 
 // Fills global variables
 static void FillGlobals( SAVEGAMETYPE* sg, int State )
@@ -399,73 +271,30 @@ static void FillGlobals( SAVEGAMETYPE* sg, int State )
 // Load game and returns true if OK
 Boolean LoadGame( int State )
 {
-  	Word prefsSize;
-  	SWord prefsVersion = noPreferenceFound;
-	SAVEGAMETYPE* sg;
-	Handle sgH;
-	Boolean DontLoad = false;
-  	UInt index = 0;
-  	VoidHand RecHandle;
-  	VoidPtr RecPointer;
-	LocalID DbId;
-	DmOpenRef pmDB;
-	
-	sgH = MemHandleNew( sizeof( SAVEGAMETYPE ) );
-	sg = MemHandleLock( sgH );
+    /* Genesis port: load from SRAM battery backup */
+    SAVEGAMETYPE sg_buf;
+    SAVEGAMETYPE* sg = &sg_buf;
 
-	if (State == 0)
-	{
-	  	prefsSize = sizeof( SAVEGAMETYPE );
-  		prefsVersion = PrefGetAppPreferences ( appFileCreator, appPrefID, sg, &prefsSize, true );
-	
-		if (prefsVersion > 1)
-    		prefsVersion = noPreferenceFound;
-
-	  	if (prefsVersion == noPreferenceFound)
-  		{
-    		CurForm = MainForm;
-    		DontLoad = true;
-	  	}
-    }
-    else
+    if (State != 0)
     {
-		DbId = DmFindDatabase( 0, (State == 1 ? SAVEGAMENAME : SWITCHGAMENAME ) );
-		if (DbId == 0)
-	  	{
-	  		if (State == 1)
-		  		FrmAlert( CannotLoadAlert );
-			MemPtrUnlock( sg );
-			MemHandleFree( sgH );
-			return false;
-		}
-	   	pmDB = DmOpenDatabase( 0, DbId, dmModeReadWrite );
-	  	RecHandle = DmGetRecord( pmDB, 0 );
-	  	if (RecHandle == NULL)
-	  	{
-	  		if (State == 1)
-		  		FrmAlert( CannotLoadAlert );
-	  		DmReleaseRecord( pmDB, 0, true );
-			DmCloseDatabase( pmDB );
-			MemPtrUnlock( sg );
-			MemHandleFree( sgH );
-			return false;
-	  	}
-  		RecPointer = MemHandleLock( RecHandle );
-		MemMove( sg, RecPointer, sizeof( SAVEGAMETYPE ) );
-	  	MemHandleUnlock( RecHandle );
-  		DmReleaseRecord( pmDB, 0, true );
-		DmCloseDatabase( pmDB );
+        /* Slot switching (State 1/2) not supported on Genesis – single save only */
+        FrmAlert( CannotLoadAlert );
+        return false;
     }
-		
-	if (!DontLoad)
-		FillGlobals( sg, State );
-	
-	MemPtrUnlock( sg );
-	MemHandleFree( sgH );
-	
-	return true;
-}
 
+    /* Check for SRAM magic */
+    extern Boolean sram_has_save(void);
+    extern void sram_load_full(SAVEGAMETYPE* sg);
+    if (!sram_has_save())
+    {
+        CurForm = MainForm;
+        return true; /* no save – start fresh */
+    }
+
+    sram_load_full(sg);
+    FillGlobals( sg, 0 );
+    return true;
+}
 
 // *************************************************************************
 // Get the current application's preferences.
@@ -567,183 +396,109 @@ void UnpackBooleans(Byte val, Boolean *a, Boolean *b, Boolean *c, Boolean *d,
 // Save the game, either in the Statesave or in a file
 Boolean SaveGame( int State )
 {
-	int i;
-	SAVEGAMETYPE* sg;
-	Handle sgH;
-  	Err err;
-  	VoidHand RecHandle;
-	LocalID DbId;
-	UInt index = 0;
-	VoidPtr p;
-	DmOpenRef pmDB;
-	Word theAttrs;
-	
-	sgH = MemHandleNew( sizeof( SAVEGAMETYPE ) );
-	sg = MemHandleLock( sgH );
+    int i;
+    SAVEGAMETYPE sg_buf;
+    SAVEGAMETYPE* sg = &sg_buf;
+    extern void sram_save_full(SAVEGAMETYPE* sg);
 
-	sg->Credits = Credits;
-	sg->Debt = Debt;
-	sg->Days = Days;
-	sg->WarpSystem = WarpSystem;
-	sg->SelectedShipType = SelectedShipType;
-	for (i=0; i<MAXTRADEITEM; ++i)
-	{
-		sg->BuyPrice[i] = BuyPrice[i];
-		sg->SellPrice[i] = SellPrice[i];
-	}
-	for (i=0; i<MAXSHIPTYPE; ++i)
-		sg->ShipPrice[i] = ShipPrice[i];
-   	sg->GalacticChartSystem = GalacticChartSystem;
-	sg->PoliceKills = PoliceKills;
-	sg->TraderKills = TraderKills;
-	sg->PirateKills = PirateKills;
-	sg->PoliceRecordScore = PoliceRecordScore;
-	sg->ReputationScore = ReputationScore;
-	sg->AutoFuel = AutoFuel;
-	sg->AutoRepair = AutoRepair;
-	sg->Clicks = Clicks;
-	sg->EncounterType = EncounterType;
-	sg->Raided = Raided;
-	sg->MonsterStatus = MonsterStatus;
-	sg->DragonflyStatus = DragonflyStatus;
-	sg->JaporiDiseaseStatus = JaporiDiseaseStatus;
-	sg->MoonBought = MoonBought;
-	sg->MonsterHull = MonsterHull;
-	StrCopy( sg->NameCommander, NameCommander );
-	sg->CurForm = CurForm;
-	MemMove( &(sg->Ship), &Ship, sizeof( sg->Ship ) );
-	MemMove( &(sg->Opponent), &Opponent, sizeof( sg->Opponent ) );
-	for (i=0; i<MAXCREWMEMBER+1; ++i)
-		MemMove( &(sg->Mercenary[i]), &Mercenary[i], sizeof( sg->Mercenary[i] ) );
-	for (i=0; i<MAXSOLARSYSTEM; ++i)
-		MemMove( &(sg->SolarSystem[i]), &SolarSystem[i], sizeof( sg->SolarSystem[i] ) );
-	for (i=0; i<MAXFORFUTUREUSE; ++i)
-		sg->ForFutureUse[i] = 0;
-	sg->EscapePod = EscapePod;
-	sg->Insurance = Insurance;
-	sg->NoClaim = NoClaim;
-	sg->Inspected = Inspected;
-	sg->LitterWarning = LitterWarning;
-	sg->AlwaysIgnoreTraders = AlwaysIgnoreTraders;
-	sg->AlwaysIgnorePolice = AlwaysIgnorePolice;
-	sg->AlwaysIgnorePirates = AlwaysIgnorePirates;
-	sg->Difficulty = Difficulty;
-	sg->VersionMajor = 1;
-	// changed from 3 to 4. SjG
-	sg->VersionMinor = 4;
-	for (i=0; i<MAXWORMHOLE; ++i)
-		sg->Wormhole[i] = Wormhole[i];
-	for (i=0; i<MAXTRADEITEM; ++i)
-		sg->BuyingPrice[i] = BuyingPrice[i];
-	sg->ArtifactOnBoard = ArtifactOnBoard;
-	sg->ReserveMoney = ReserveMoney;
-	sg->PriceDifferences = PriceDifferences;
-	sg->APLscreen = APLscreen;
-	sg->TribbleMessage = TribbleMessage;
-	sg->AlwaysInfo = AlwaysInfo;
-	sg->LeaveEmpty = LeaveEmpty;
-	sg->TextualEncounters = TextualEncounters;
-	sg->JarekStatus = JarekStatus;
-	sg->InvasionStatus = InvasionStatus;
-	sg->Continuous = Continuous;
-	sg->AttackFleeing = AttackFleeing;
-	sg->ExperimentAndWildStatus = PackBytes(ExperimentStatus, WildStatus);
-	sg->FabricRipProbability = FabricRipProbability;
-	sg->VeryRareEncounter = VeryRareEncounter;
-	sg->BooleanCollection = PackBooleans(UseHWButtons, NewsAutoPay,
-				ShowTrackedRange, JustLootedMarie, ArrivedViaWormhole, TrackAutoOff,
-				RemindLoans, CanSuperWarp);
+    /* Pack all game state into sg */
+    sg->Credits = Credits;
+    sg->Debt = Debt;
+    sg->Days = Days;
+    sg->WarpSystem = WarpSystem;
+    sg->SelectedShipType = SelectedShipType;
+    for (i=0; i<MAXTRADEITEM; ++i)
+    {
+        sg->BuyPrice[i] = BuyPrice[i];
+        sg->SellPrice[i] = SellPrice[i];
+    }
+    for (i=0; i<MAXSHIPTYPE; ++i)
+        sg->ShipPrice[i] = ShipPrice[i];
+    sg->GalacticChartSystem = GalacticChartSystem;
+    sg->PoliceKills = PoliceKills;
+    sg->TraderKills = TraderKills;
+    sg->PirateKills = PirateKills;
+    sg->PoliceRecordScore = PoliceRecordScore;
+    sg->ReputationScore = ReputationScore;
+    sg->AutoFuel = AutoFuel;
+    sg->AutoRepair = AutoRepair;
+    sg->Clicks = Clicks;
+    sg->EncounterType = EncounterType;
+    sg->Raided = Raided;
+    sg->MonsterStatus = MonsterStatus;
+    sg->DragonflyStatus = DragonflyStatus;
+    sg->JaporiDiseaseStatus = JaporiDiseaseStatus;
+    sg->MoonBought = MoonBought;
+    sg->MonsterHull = MonsterHull;
+    StrCopy( sg->NameCommander, NameCommander );
+    sg->CurForm = CurForm;
+    MemMove( &(sg->Ship), &Ship, sizeof( sg->Ship ) );
+    MemMove( &(sg->Opponent), &Opponent, sizeof( sg->Opponent ) );
+    for (i=0; i<MAXCREWMEMBER+1; ++i)
+        MemMove( &(sg->Mercenary[i]), &Mercenary[i], sizeof( sg->Mercenary[i] ) );
+    for (i=0; i<MAXSOLARSYSTEM; ++i)
+        MemMove( &(sg->SolarSystem[i]), &SolarSystem[i], sizeof( sg->SolarSystem[i] ) );
+    for (i=0; i<MAXFORFUTUREUSE; ++i)
+        sg->ForFutureUse[i] = 0;
+    sg->EscapePod = EscapePod;
+    sg->Insurance = Insurance;
+    sg->NoClaim = NoClaim;
+    sg->Inspected = Inspected;
+    sg->LitterWarning = LitterWarning;
+    sg->AlwaysIgnoreTraders = AlwaysIgnoreTraders;
+    sg->AlwaysIgnorePolice = AlwaysIgnorePolice;
+    sg->AlwaysIgnorePirates = AlwaysIgnorePirates;
+    sg->Difficulty = Difficulty;
+    sg->VersionMajor = 1;
+    sg->VersionMinor = 4;
+    for (i=0; i<MAXWORMHOLE; ++i)
+        sg->Wormhole[i] = Wormhole[i];
+    for (i=0; i<MAXTRADEITEM; ++i)
+        sg->BuyingPrice[i] = BuyingPrice[i];
+    sg->ArtifactOnBoard = ArtifactOnBoard;
+    sg->ReserveMoney = ReserveMoney;
+    sg->PriceDifferences = PriceDifferences;
+    sg->APLscreen = APLscreen;
+    sg->TribbleMessage = TribbleMessage;
+    sg->AlwaysInfo = AlwaysInfo;
+    sg->LeaveEmpty = LeaveEmpty;
+    sg->TextualEncounters = TextualEncounters;
+    sg->JarekStatus = JarekStatus;
+    sg->InvasionStatus = InvasionStatus;
+    sg->Continuous = Continuous;
+    sg->AttackFleeing = AttackFleeing;
+    sg->ExperimentAndWildStatus = PackBytes(ExperimentStatus, WildStatus);
+    sg->FabricRipProbability = FabricRipProbability;
+    sg->VeryRareEncounter = VeryRareEncounter;
+    sg->BooleanCollection = PackBooleans(UseHWButtons, NewsAutoPay,
+        ShowTrackedRange, JustLootedMarie, ArrivedViaWormhole, TrackAutoOff,
+        RemindLoans, CanSuperWarp);
     sg->ReactorStatus = ReactorStatus;
     sg->TrackedSystem = TrackedSystem;
     sg->ScarabStatus = ScarabStatus;
- 	sg->AlwaysIgnoreTradeInOrbit = AlwaysIgnoreTradeInOrbit;
-	sg->AlreadyPaidForNewspaper = AlreadyPaidForNewspaper;
-	sg->GameLoaded = GameLoaded;
-	sg->SharePreferences = SharePreferences;
-	sg->IdentifyStartup = IdentifyStartup;
-	sg->Shortcut1 = Shortcut1;
-	sg->Shortcut2 = Shortcut2;
-	sg->Shortcut3 = Shortcut3;
-	sg->Shortcut4 = Shortcut4;
-	sg->RectangularButtonsOn = RectangularButtonsOn;
+    sg->AlwaysIgnoreTradeInOrbit = AlwaysIgnoreTradeInOrbit;
+    sg->AlreadyPaidForNewspaper = AlreadyPaidForNewspaper;
+    sg->GameLoaded = GameLoaded;
+    sg->SharePreferences = SharePreferences;
+    sg->IdentifyStartup = IdentifyStartup;
+    sg->Shortcut1 = Shortcut1;
+    sg->Shortcut2 = Shortcut2;
+    sg->Shortcut3 = Shortcut3;
+    sg->Shortcut4 = Shortcut4;
+    sg->RectangularButtonsOn = RectangularButtonsOn;
 
-	if (State == 0)
-		PrefSetAppPreferences( appFileCreator, appPrefID, appPrefVersionNum, 
-			sg, sizeof( SAVEGAMETYPE ), true );
-	else 
-	{
-		if (State == 2)
-		{
-			if (!LoadGame( 2 ))
-				NameCommander[0] = '\0';
-		}
-		
-		DbId = DmFindDatabase( 0, (State == 1 ? SAVEGAMENAME : SWITCHGAMENAME ) );
-		if (DbId == 0)
-		{
-		   	err = DmCreateDatabase( 0, (State == 1 ? SAVEGAMENAME : SWITCHGAMENAME ), appFileCreator, 'Data', false );
-	      	if (err != errNone)
-	      	{
-	      		FrmAlert( (State == 1 ? CannotSaveAlert : CannotSwitchAlert ) );
-	      		if (State == 2)
-	      			FillGlobals( sg, State );
-				MemPtrUnlock( sg );
-				MemHandleFree( sgH );
-	      		return false;
-	      	}
-			DbId = DmFindDatabase( 0, (State == 1 ? SAVEGAMENAME : SWITCHGAMENAME ) );
-			if (DbId == 0)
-			{
-	      		FrmAlert( (State == 1 ? CannotSaveAlert : CannotSwitchAlert ) );
-	      		if (State == 2)
-	      			FillGlobals( sg, State ); // Restore previous setting
-				MemPtrUnlock( sg );
-				MemHandleFree( sgH );
-				return false;
-			}
-			
-		   	pmDB = DmOpenDatabase( 0, DbId, dmModeReadWrite );
-		   	RecHandle = DmNewRecord( pmDB, &index, sizeof( SAVEGAMETYPE ) );
-		    DmWrite( MemHandleLock( RecHandle ), 0, sg, sizeof( SAVEGAMETYPE ) );
-		    MemHandleUnlock( RecHandle );
-		}
-		else
-		{
-		   	pmDB = DmOpenDatabase( 0, DbId, dmModeReadWrite );
-		   	p = MemHandleLock( DmGetRecord( pmDB, 0 ) );
-		    DmWrite( p, 0, sg, sizeof( SAVEGAMETYPE ) );
-		    MemPtrUnlock( p );
-		}
-
-	    DmReleaseRecord( pmDB, 0, true );
-
-		// Get the attributes for our database
-		DmDatabaseInfo( 0, DbId, NULL, &theAttrs, NULL, NULL,
-			NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-	
-		// Set the backup flag
-		theAttrs |= dmHdrAttrBackup;
-	
-		// Set the attributes
-		DmSetDatabaseInfo( 0, DbId, NULL, &theAttrs, NULL, NULL,
-			NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-
-		DmCloseDatabase( pmDB );
-	}
-
-	MemPtrUnlock( sg );
-	MemHandleFree( sgH );
-	
-	return true;
+    /* Genesis port: write to SRAM (all States map to single slot) */
+    (void)State;
+    sram_save_full(sg);
+    return true;
 }
-
 // *************************************************************************
 // Save the current state of the application.
 // *************************************************************************
 static void AppStop(void)
 {
-	SaveGame( 0 );
-	FrmCloseAllForms();
+    SaveGame( 0 );
+    /* FrmCloseAllForms – no-op on Genesis */
 }
 
 // *************************************************************************
@@ -751,45 +506,45 @@ static void AppStop(void)
 // ************************************************************************* 
 static void AppEventLoop(void)
 {
-	Word error;
-	EventType event;
-	UInt32 LastTicks;
+    /* Genesis port: main game loop.
+     * We poll joypad via ui_vsync() (called inside GEN_EvtGetEvent),
+     * synthesize Palm-style events, then dispatch through the original
+     * AppHandleEvent / form handler chain exactly as the Palm version did.
+     * The only difference: on Continuous auto-attack we fire every 1 second
+     * (60 frames) instead of using SysTicksPerSecond timing. */
+    Word error;
+    EventType event;
+    uint32_t last_auto_tick = 0;
 
-	do 
-	{
-		if (Continuous && (AutoAttack || AutoFlee) && (CurForm == EncounterForm))
-		{
-			LastTicks = TimGetTicks();
-	
-			EvtGetEvent( &event, SysTicksPerSecond());
-			
-			if (event.eType == nilEvent && 
-			    (3 * (TimGetTicks() - LastTicks) > 2 * SysTicksPerSecond()))
-			{
-				EncounterFormHandleEvent( &event );
-				continue;
-			}
-		}
-		else
-			EvtGetEvent(&event, evtWaitForever);
-		
-		if ( (UseHWButtons && event.eType == keyDownEvent && (event.data.keyDown.chr == vchrHard1 ||
-		      event.data.keyDown.chr == vchrHard2 || event.data.keyDown.chr == vchrHard3 ||
-		      event.data.keyDown.chr == vchrHard4) ) || 
-		     !SysHandleEvent(&event))
-			if (!MenuHandleEvent(0, &event, &error))
-				if (!AppHandleEvent(&event))
-					FrmDispatchEvent(&event);
+    do
+    {
+        if (Continuous && (AutoAttack || AutoFlee) && (CurForm == EncounterForm))
+        {
+            GEN_EvtGetEvent(&event, SysTicksPerSecond());
+            if (event.eType == nilEvent &&
+                (ui_frame_count - last_auto_tick) >= (uint32_t)SysTicksPerSecond())
+            {
+                last_auto_tick = ui_frame_count;
+                EncounterFormHandleEvent(&event);
+                continue;
+            }
+        }
+        else
+        {
+            GEN_EvtGetEvent(&event, -1);
+        }
 
-		if (CurForm != EncounterForm)
-		{
-			AutoAttack = false;
-			AutoFlee = false;
-		}
+        if (!AppHandleEvent(&event))
+            FrmDispatchEvent(&event);
 
-	} while (event.eType != appStopEvent);
+        if (CurForm != EncounterForm)
+        {
+            AutoAttack = false;
+            AutoFlee   = false;
+        }
+
+    } while (event.eType != appStopEvent);
 }
-
 // *************************************************************************
 // This routine is the event handler for the Start screen.
 // *************************************************************************
@@ -852,138 +607,17 @@ Boolean DefaultFormHandleEvent(EventPtr eventP)
 // *************************************************************************
 // This is the main application.
 // *************************************************************************
-long MerchantPilotMain( Word cmd, Ptr cmdPBP, Word launchFlags )
+/* Genesis port: MerchantPilotMain / PilotMain are called from main.c's
+ * int main() entry point. We expose the three lifecycle functions directly. */
+Err GenAppStart(void)
 {
-	Err error;
-	int i;
-
-	switch (cmd)
-	{
-		case sysAppLaunchCmdNormalLaunch:
-			error = RomVersionCompatible (ourMinVersion, launchFlags);
-			if (error) 
-				return error;
-
-			error = OutdatedSoftware();
-			if (error) 
-				return error;
-
-			error = GraphicsSupport();
-			if (error) 
-				return error;
-
-			SystemBmp = DmGetResource( bitmapRsc, SystemBitmapFamily );
-			SystemBmpPtr = MemHandleLock( SystemBmp );	
-			CurrentSystemBmp = DmGetResource( bitmapRsc, CurrentSystemBitmapFamily );
-			CurrentSystemBmpPtr = MemHandleLock( CurrentSystemBmp );	
-			ShortRangeSystemBmp = DmGetResource( bitmapRsc, ShortRangeSystemBitmapFamily );
-			ShortRangeSystemBmpPtr = MemHandleLock( ShortRangeSystemBmp );	
-			WormholeBmp = DmGetResource( bitmapRsc, WormholeBitmapFamily );
-			WormholeBmpPtr = MemHandleLock( WormholeBmp );	
-			SmallWormholeBmp = DmGetResource( bitmapRsc, SmallWormholeBitmapFamily );
-			SmallWormholeBmpPtr = MemHandleLock( SmallWormholeBmp );	
-			VisitedSystemBmp = DmGetResource( bitmapRsc, VisitedSystemBitmapFamily );
-			VisitedSystemBmpPtr = MemHandleLock( VisitedSystemBmp );	
-			CurrentVisitedSystemBmp = DmGetResource( bitmapRsc, CurrentVisitedSystemBitmapFamily );
-			CurrentVisitedSystemBmpPtr = MemHandleLock( CurrentVisitedSystemBmp );	
-			VisitedShortRangeSystemBmp = DmGetResource( bitmapRsc, VisitedShortRangeSystemBitmapFamily );
-			VisitedShortRangeSystemBmpPtr = MemHandleLock( VisitedShortRangeSystemBmp );
-
-            // Load bitmaps for the ships (4 Bitmap Family Groups Per Ship) FleaBitmapFamily is the Base
-			for (i=0; i<MAXSHIPTYPE+EXTRASHIPS; i++)
-			{
-				ShipBmp[i]                   = DmGetResource( bitmapRsc, FleaBitmapFamily + i*400);
-				ShipBmpPtr[i]                = MemHandleLock( ShipBmp[i] );	
-				DamagedShipBmp[i]            = DmGetResource( bitmapRsc, FleaDamagedBitmapFamily + i*400 );
-				DamagedShipBmpPtr[i]         = MemHandleLock( DamagedShipBmp[i] );	
-				
-				if (Shiptype[i].ShieldSlots <= 0)
-				{
-					ShieldedShipBmp[i]           = ShipBmp[i];
-					ShieldedShipBmpPtr[i]        = ShipBmpPtr[i];	
-					DamagedShieldedShipBmp[i]    = DamagedShipBmp[i];
-					DamagedShieldedShipBmpPtr[i] = DamagedShipBmpPtr[i];	
-				}
-				else
-				{
-					ShieldedShipBmp[i]           = DmGetResource( bitmapRsc, FireflyShieldedBitmapFamily + (i-2)*400);
-					ShieldedShipBmpPtr[i]        = MemHandleLock( ShieldedShipBmp[i] );	
-					DamagedShieldedShipBmp[i]    = DmGetResource( bitmapRsc, FireflyShDamBitmapFamily + (i-2)*400);
-					DamagedShieldedShipBmpPtr[i] = MemHandleLock( DamagedShieldedShipBmp[i] );	
-				}
-			}
-			
-			
-			for (i=0; i<5; i++)
-			{
-				IconBmp[i] = DmGetResource( bitmapRsc, PirateBitmapFamily + i*100);
-				IconBmpPtr[i] = MemHandleLock( IconBmp[i] );	
-				
-			}
-			
-			
-			error = AppStart();
-			if (error) 
-				return error;
-
-			if (IdentifyStartup)
-				FrmCustomAlert( IdentifyStartupAlert, NameCommander, "", "" );
-				
-			FrmGotoForm( CurForm );
-			AppEventLoop();
-			AppStop();
-			
-			for (i=4; i>=0; i--)
-			{
-				MemHandleUnlock( IconBmp[i] );	
-				DmReleaseResource( IconBmp[i] );
-			}
-			
-			for (i=MAXSHIPTYPE+EXTRASHIPS-1; i>=0; i--)
-			{
-				if (Shiptype[i].ShieldSlots > 0)
-				{
-					MemHandleUnlock( DamagedShieldedShipBmp[i] );	
-					DmReleaseResource( DamagedShieldedShipBmp[i] );
-					MemHandleUnlock( ShieldedShipBmp[i] );	
-					DmReleaseResource( ShieldedShipBmp[i] );
-				}
-				MemHandleUnlock( DamagedShipBmp[i] );	
-				DmReleaseResource( DamagedShipBmp[i] );
-				MemHandleUnlock( ShipBmp[i] );	
-				DmReleaseResource( ShipBmp[i] );
-			}
-			
-			MemHandleUnlock( VisitedShortRangeSystemBmp );	
-			DmReleaseResource( VisitedShortRangeSystemBmp );
-			MemHandleUnlock( CurrentVisitedSystemBmp );	
-			DmReleaseResource( CurrentVisitedSystemBmp );
-			MemHandleUnlock( VisitedSystemBmp );	
-			DmReleaseResource( VisitedSystemBmp );
-			MemHandleUnlock( SmallWormholeBmp );	
-			DmReleaseResource( SmallWormholeBmp );
-			MemHandleUnlock( WormholeBmp );	
-			DmReleaseResource( WormholeBmp );
-			MemHandleUnlock( ShortRangeSystemBmp );	
-			DmReleaseResource( ShortRangeSystemBmp );
-			MemHandleUnlock( CurrentSystemBmp );	
-			DmReleaseResource( CurrentSystemBmp );
-			MemHandleUnlock( SystemBmp );	
-			DmReleaseResource( SystemBmp );
-			break;
-
-		default:
-			break;
-	}
-	
-	EndGraphicsSupport();
-	return 0;
+    return AppStart();
 }
-
-// *************************************************************************
-// This is the main entry point for the application.
-// *************************************************************************
-DWord PilotMain( Word cmd, Ptr cmdPBP, Word launchFlags)
+void GenAppLoop(void)
 {
-    return MerchantPilotMain(cmd, cmdPBP, launchFlags);
+    AppEventLoop();
+}
+void GenAppStop(void)
+{
+    AppStop();
 }

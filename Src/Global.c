@@ -38,12 +38,8 @@
 // access to the global variable
 //
 
-#define PILOT_PRECOMPILED_HEADERS_OFF 1
-
-#include <PalmCompatibility.h>
-#include <PalmOS.h>
-#include "spacetrader.h"
-#include "MerchantRsc.h"
+/* Genesis port: Palm OS headers replaced by compatibility layer */
+#include "external.h"
 
 const POLICERECORD PoliceRecord[MAXPOLICERECORD] =
 {
@@ -488,7 +484,7 @@ Byte Wormhole[MAXWORMHOLE]; // Systems which have a wormhole
 // Quest descriptions have been moved into the Resources.
 // This makes them marginally easier to edit, as well as moves them out
 // of the heap during runtime. SjG
-const SPECIALEVENT SpecialEvent[MAXSPECIALEVENT] =
+SPECIALEVENT SpecialEvent[MAXSPECIALEVENT] =
 {
 	{ "Dragonfly Destroyed",	QuestDragonflyDestroyedString,		0, 0, true },
 	{ "Weird Ship",				QuestWeirdShipString,				0, 0, true },
@@ -556,35 +552,35 @@ char SBuf2[51];
 //int NewsEvents[MAXSPECIALNEWSEVENTS];
 
  
-Handle    SystemBmp;
-Handle    CurrentSystemBmp;
-Handle    ShortRangeSystemBmp;
-Handle    WormholeBmp;
-Handle    SmallWormholeBmp;
-Handle    VisitedSystemBmp;
-Handle    CurrentVisitedSystemBmp;
-Handle    VisitedShortRangeSystemBmp;
-Handle    ShipBmp[MAXSHIPTYPE+EXTRASHIPS];
-Handle    DamagedShipBmp[MAXSHIPTYPE+EXTRASHIPS];
-Handle    ShieldedShipBmp[MAXSHIPTYPE+EXTRASHIPS];
-Handle    DamagedShieldedShipBmp[MAXSHIPTYPE+EXTRASHIPS];
-Handle    IconBmp[5];
-BitmapPtr SystemBmpPtr;
-BitmapPtr CurrentSystemBmpPtr;
-BitmapPtr ShortRangeSystemBmpPtr;
-BitmapPtr WormholeBmpPtr;
-BitmapPtr SmallWormholeBmpPtr;
-BitmapPtr VisitedSystemBmpPtr;
-BitmapPtr CurrentVisitedSystemBmpPtr;
-BitmapPtr VisitedShortRangeSystemBmpPtr;
-BitmapPtr ShipBmpPtr[MAXSHIPTYPE+EXTRASHIPS];
-BitmapPtr DamagedShipBmpPtr[MAXSHIPTYPE+EXTRASHIPS];
-BitmapPtr ShieldedShipBmpPtr[MAXSHIPTYPE+EXTRASHIPS];
-BitmapPtr DamagedShieldedShipBmpPtr[MAXSHIPTYPE+EXTRASHIPS];
-BitmapPtr IconBmpPtr[5];
+void* SystemBmp = NULL;
+void* CurrentSystemBmp = NULL;
+void* ShortRangeSystemBmp = NULL;
+void* WormholeBmp = NULL;
+void* SmallWormholeBmp = NULL;
+void* VisitedSystemBmp = NULL;
+void* CurrentVisitedSystemBmp = NULL;
+void* VisitedShortRangeSystemBmp = NULL;
+void* ShipBmp[MAXSHIPTYPE+EXTRASHIPS];
+void* DamagedShipBmp[MAXSHIPTYPE+EXTRASHIPS];
+void* ShieldedShipBmp[MAXSHIPTYPE+EXTRASHIPS];
+void* DamagedShieldedShipBmp[MAXSHIPTYPE+EXTRASHIPS];
+void* IconBmp[5];
+void* SystemBmpPtr = NULL;
+void* CurrentSystemBmpPtr = NULL;
+void* ShortRangeSystemBmpPtr = NULL;
+void* WormholeBmpPtr = NULL;
+void* SmallWormholeBmpPtr = NULL;
+void* VisitedSystemBmpPtr = NULL;
+void* CurrentVisitedSystemBmpPtr = NULL;
+void* VisitedShortRangeSystemBmpPtr = NULL;
+void* ShipBmpPtr[MAXSHIPTYPE+EXTRASHIPS];
+void* DamagedShipBmpPtr[MAXSHIPTYPE+EXTRASHIPS];
+void* ShieldedShipBmpPtr[MAXSHIPTYPE+EXTRASHIPS];
+void* DamagedShieldedShipBmpPtr[MAXSHIPTYPE+EXTRASHIPS];
+void* IconBmpPtr[5];
  
 unsigned long GalacticChartUpdateTicks = 0;
-Handle NameH;
+void* NameH = NULL;
 //DmOpenRef pmDB;
   
 // The following globals are saved between sessions

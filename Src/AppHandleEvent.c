@@ -41,7 +41,7 @@ static Boolean DockedFormDoCommand(Word command)
 {
 	Boolean handled = true;
 	FormPtr	frm;
-	Handle AmountH;
+	void* AmountH;
 	int NewForm = -1;
 	UInt16 buttonPressed = 0;
 	Boolean inOpts;
@@ -210,7 +210,7 @@ static Boolean DockedFormDoCommand(Word command)
 					SetCheckBox( frm, OptionsAttackFleeingCheckbox, AttackFleeing );
 				
 					StrIToA( SBuf, min( 99, LeaveEmpty ) );
-					AmountH = (Handle) SetField( frm, OptionsLeaveEmptyField, SBuf, 4, true );
+					AmountH = (void*) SetField( frm, OptionsLeaveEmptyField, SBuf, 4, true );
 					
 					buttonPressed = FrmDoDialog( frm );
 
