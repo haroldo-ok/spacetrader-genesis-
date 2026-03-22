@@ -154,7 +154,11 @@ extern FormPtr GEN_FrmGetActiveForm(void);
 #define FrmHideObject(f,i)      ((void)0)
 #define FrmGetObjectIndex(f,id) (id)
 #define FrmDrawForm(f)          ((void)0)
-#define FrmDispatchEvent(ep)    (0)
+/* FrmDispatchEvent – calls stored form handler; implemented in ui.c */
+/* EventType forward-declared here; fully defined later in this file */
+struct _EventType;
+extern Boolean GEN_FrmDispatchEvent(struct _EventType* ep);
+#define FrmDispatchEvent(ep)    GEN_FrmDispatchEvent(ep)
 #define FrmHandleEvent(f,ep)    (0)
 
 /* Alerts – routed to UI message box */
@@ -315,7 +319,7 @@ extern uint32_t romVersion;   /* defined in main.c = 0x03503000 */
 #define frmGotoEvent   11
 #define menuEvent      9
 
-typedef struct {
+typedef struct _EventType {
     uint16_t eType;
     /* Palm OS exposes pen coords at top level of event struct */
     int16_t  screenX;
@@ -402,7 +406,9 @@ typedef struct { uint8_t r,g,b; } RGBColorType;
 #define FrmInitForm(id)              ((FormPtr)(intptr_t)(id))
 #define FrmDeleteForm(f)             ((void)0)
 #define FrmGetFormPtr(id)            ((FormPtr)(intptr_t)(id))
-#define FrmSetEventHandler(f,h)      ((void)0)
+/* FrmSetEventHandler – stores handler; implemented in ui.c */
+extern void GEN_FrmSetEventHandler(FormPtr frm, void* handler);
+#define FrmSetEventHandler(f,h)      GEN_FrmSetEventHandler(f, (void*)(h))
 #define FrmSetActiveForm(f)          ((void)0)
 #define FrmSetMenu(f,id)             ((void)0)
 #define FrmHelp(id)                  ((void)0)

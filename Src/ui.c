@@ -552,8 +552,19 @@ __attribute__((used)) void GEN_FrmGotoForm(int formID)
 {
     int i;
     kprintf("FrmGotoForm: formID=%d (was %d)", formID, (int)ui_current_form);
+    kprintf("FrmGotoForm: id=%d registering handler", formID);
     ui_current_form    = formID;
-    _pending_form_open = 1;
+    /* Synthesize frmLoadEvent immediately so AppHandleEvent registers
+     * the form-specific handler via FrmSetEventHandler. */
+    {
+        EventType load_ev;
+        memset(&load_ev, 0, sizeof(load_ev));
+        load_ev.eType              = frmLoadEvent;
+        load_ev.data.frmLoad.formID = (uint16_t)formID;
+        AppHandleEvent(&load_ev);
+        kprintf("FrmGotoForm: frmLoadEvent dispatched for %d", formID);
+    }
+    _pending_form_open = 1; /* frmOpenEvent delivered on next GEN_EvtGetEvent */
 
     /* Clear body and draw form title immediately */
     ui_clear_body();
@@ -581,6 +592,53 @@ __attribute__((used)) int GEN_FrmGetActiveFormID(void)
 __attribute__((used)) FormPtr GEN_FrmGetActiveForm(void)
 {
     return (FormPtr)(intptr_t)ui_current_form;
+}
+
+/* -----------------------------------------------------------------------
+ * Form event handler registry
+ * On Palm OS, FrmSetEventHandler() registers a callback that
+ * FrmDispatchEvent() invokes for every event on the active form.
+ * We maintain a table of (formID → handler) pairs.
+ * --------------------------------------------------------------------- */
+#define MAX_FORM_HANDLERS 32
+static struct {
+    int                  formID;
+    FormEventHandlerType *handler;
+} _form_handlers[MAX_FORM_HANDLERS];
+static int _form_handler_count = 0;
+
+__attribute__((used)) void GEN_FrmSetEventHandler(FormPtr frm, void* handler)
+{
+    int id = (int)(intptr_t)frm;
+    int i;
+    /* Update existing entry */
+    for (i = 0; i < _form_handler_count; i++) {
+        if (_form_handlers[i].formID == id) {
+            _form_handlers[i].handler = (FormEventHandlerType*)handler;
+            kprintf("FrmSetEventHandler: updated form %d", id);
+            return;
+        }
+    }
+    /* Add new entry */
+    if (_form_handler_count < MAX_FORM_HANDLERS) {
+        _form_handlers[_form_handler_count].formID   = id;
+        _form_handlers[_form_handler_count].handler  = (FormEventHandlerType*)handler;
+        _form_handler_count++;
+        kprintf("FrmSetEventHandler: registered form %d", id);
+    }
+}
+
+__attribute__((used)) Boolean GEN_FrmDispatchEvent(EventType* ep)
+{
+    int i;
+    for (i = 0; i < _form_handler_count; i++) {
+        if (_form_handlers[i].formID == ui_current_form) {
+            if (_form_handlers[i].handler) {
+                return _form_handlers[i].handler(ep);
+            }
+        }
+    }
+    return false;
 }
 
 /* Alert system – map alert IDs to short messages */
