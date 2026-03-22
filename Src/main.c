@@ -146,9 +146,12 @@ bool main(void)
 {
     /* ── Hardware setup ── */
     VDP_setScreenWidth320();
+    KLog("main: start");
 
     /* ── UI engine init ── */
     ui_init();
+    KLog("main: ui_init done");
+    KLog("main: ui_init done");
 
     /* Enable SGDK SRAM support */
     SRAM_enable();
@@ -156,9 +159,12 @@ bool main(void)
 
     /* ── Splash screen ── */
     show_splash();
+    KLog("main: splash done");
 
+    KLog("main: splash done, checking save");
     /* ── Determine launch mode ── */
     Boolean has_save = sram_has_save();
+    KLog("main: has_save=%d", (int)has_save);
     Boolean new_game = false;
 
     if (has_save)
@@ -189,8 +195,11 @@ bool main(void)
     /* ── New game: name + difficulty first ── */
     if (new_game)
     {
+        KLog("main: starting new game flow");
         commander_name_screen();
+        KLog("main: name=%s", NameCommander);
         difficulty_screen();
+        KLog("main: difficulty=%d", (int)Difficulty);
         /* Zero the save so AppStart doesn't find a stale one */
         SRAM_enable();
         uint16_t zero = 0;
@@ -199,7 +208,11 @@ bool main(void)
     }
 
     /* ── Initialise game state (loads save or sets up defaults) ── */
+    KLog("main: calling GenAppStart");
+    KLog("main: calling GenAppStart");
     Err err = GenAppStart();
+    KLog("main: GenAppStart returned %d, CurForm=%d", (int)err, (int)CurForm);
+    KLog("main: GenAppStart done, CurForm=%d err=%d", CurForm, (int)err);
     if (err)
     {
         ui_clear_screen();
@@ -210,11 +223,17 @@ bool main(void)
     /* If new game, start fresh (replaces Palm's NewCommanderFormHandleEvent) */
     if (new_game)
     {
+        KLog("main: calling StartNewGame, name=%s", NameCommander);
         StartNewGame();
+        KLog("main: StartNewGame done, CurForm=%d", CurForm);
     }
 
+    KLog("main: entering GenAppLoop, CurForm=%d", CurForm);
+    KLog("main: entering GenAppLoop, CurForm=%d", (int)CurForm);
     /* ── Main game loop ── */
     GenAppLoop();
+    KLog("main: GenAppLoop returned");
+    KLog("main: GenAppLoop exited");
 
     /* ── Shutdown: save state ── */
     GenAppStop();

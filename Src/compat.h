@@ -44,4 +44,16 @@ void SRAM_readBuffer(void* data, u32 offset, u32 len);
 /* ── Palm OS menu stub ─────────────────────────────────────────────── */
 void MenuEraseStatus(void* menuPtr);
 
+
+/* -----------------------------------------------------------------------
+ * SGDK debug logging (kdebug.h / genesis.h in SGDK 1.70)
+ * KLog sends formatted text to the emulator debug console.
+ * KDebug_Alert pops a blocking message (use sparingly).
+ * --------------------------------------------------------------------- */
+extern void KLog(const char* fmt, ...);
+extern void KDebug_Alert(const char* msg);
+
+/* Convenience wrapper that also prints to our tile display */
+#define KLOG(fmt, ...) KLog("[ST] " fmt, ##__VA_ARGS__)
+
 #endif /* COMPAT_H */

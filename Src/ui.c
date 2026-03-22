@@ -517,9 +517,60 @@ void ui_draw_galaxy_map(void)
 
 /* Form navigation – sets ui_current_form; the main loop calls the
  * appropriate screen handler after each FrmGotoForm call. */
+/* Pending frmOpenEvent flag (set by GEN_FrmGotoForm, cleared by GEN_EvtGetEvent) */
+static int _pending_form_open = 0;
+
+/* Form title / hint lookup table */
+static const struct { int id; const char* title; const char* hint; }
+_form_titles[] = {
+    { MainForm,              "SPACE TRADER",      "A=New Game" },
+    { NewCommanderForm,      "NEW COMMANDER",     "UP/DN=field LR=value A=OK" },
+    { SystemInformationForm, "SYSTEM INFO",       "A=Warp B=Buy C=Sell S=Yard" },
+    { GalacticChartForm,     "GALACTIC CHART",    "A=Warp B=Back" },
+    { WarpForm,              "WARP",              "A=Confirm B=Back" },
+    { ExecuteWarpForm,       "EXECUTE WARP",      "A=Warp B=Chart" },
+    { BuyCargoForm,          "BUY CARGO",         "A=Buy B=Back" },
+    { SellCargoForm,         "SELL CARGO",        "A=Sell B=Back" },
+    { ShipYardForm,          "SHIPYARD",          "A=Select B=Back" },
+    { BuyShipForm,           "BUY SHIP",          "A=Buy B=Back" },
+    { BuyEquipmentForm,      "BUY EQUIPMENT",     "A=Buy B=Back" },
+    { SellEquipmentForm,     "SELL EQUIPMENT",    "A=Sell B=Back" },
+    { CommanderStatusForm,   "COMMANDER STATUS",  "B=Back" },
+    { PersonnelRosterForm,   "PERSONNEL",         "A=Hire B=Back" },
+    { EncounterForm,         "ENCOUNTER",         "A=Atk B=Flee C=Ign S=Stop" },
+    { BankForm,              "BANK",              "A=Select B=Back" },
+    { SpecialEventForm,      "SPECIAL EVENT",     "A=OK" },
+    { CurrentShipForm,       "CURRENT SHIP",      "B=Back" },
+    { QuestsForm,            "QUESTS",            "B=Back" },
+    { PlunderForm,           "PLUNDER",           "A=Take B=Done" },
+    { AveragePricesForm,     "AVG PRICES",        "B=Back" },
+    { SpecialCargoForm,      "SPECIAL CARGO",     "A=OK" },
+    { 0, NULL, NULL }
+};
+
 __attribute__((used)) void GEN_FrmGotoForm(int formID)
 {
-    ui_current_form = formID;
+    int i;
+    KLog("FrmGotoForm: formID=%d (was %d)", formID, (int)ui_current_form);
+    ui_current_form    = formID;
+    _pending_form_open = 1;
+
+    /* Clear body and draw form title immediately */
+    ui_clear_body();
+    for (i = 0; _form_titles[i].id != 0; i++)
+    {
+        if (_form_titles[i].id == formID)
+        {
+            ui_title(_form_titles[i].title);
+            ui_status(_form_titles[i].hint);
+            return;
+        }
+    }
+    {
+        char tbuf[32];
+        snprintf(tbuf, sizeof(tbuf), "FORM %d", formID);
+        ui_title(tbuf);
+    }
 }
 
 __attribute__((used)) int GEN_FrmGetActiveFormID(void)
@@ -643,7 +694,6 @@ __attribute__((used)) void GEN_WinDrawBitmap(BitmapPtr bmp, int x, int y)
 }
 
 /* Event system – we synthesise events from joypad state */
-static int _pending_form_open = 0;
 
 static EventType _queued_event;
 static int _has_queued_event = 0;
@@ -664,13 +714,181 @@ __attribute__((used)) void GEN_EvtGetEvent(EventType* ep, int32_t timeout)
 
     if (_pending_form_open)
     {
+        KLOG("EvtGetEvent: delivering frmOpenEvent for form %d", ui_current_form);
         ep->eType          = frmOpenEvent;
         ep->data.frmOpen.formID = ui_current_form;
         _pending_form_open = 0;
         return;
     }
 
-    /* Map joypad to key events that the game logic understands */
+    /* ── Form-specific joypad → event mapping ───────────────────── */
+    if (ui_joy_pressed)
+    {
+        int      ctl       = 0;
+        uint16_t kdown_chr = 0;
+
+        switch (ui_current_form)
+        {
+            /* New Commander: Up/Down cycles field, Left/Right changes value */
+            case NewCommanderForm:
+            {
+                static int nc_field = 1; /* 0=Diff 1=Pilot 2=Fighter 3=Trader 4=Eng */
+                static const int nc_inc[] = {
+                    NewCommanderIncDifficultyButton,
+                    NewCommanderIncPilotButton,
+                    NewCommanderIncFighterButton,
+                    NewCommanderIncTraderButton,
+                    NewCommanderIncEngineerButton
+                };
+                static const int nc_dec[] = {
+                    NewCommanderDecDifficultyButton,
+                    NewCommanderDecPilotButton,
+                    NewCommanderDecFighterButton,
+                    NewCommanderDecTraderButton,
+                    NewCommanderDecEngineerButton
+                };
+                static const char* nc_labels[] =
+                    {"Difficulty","Pilot","Fighter","Trader","Engineer"};
+                if      (ui_joy_pressed & BTN_A)     ctl = NewCommanderOKButton;
+                else if (ui_joy_pressed & BTN_UP)    { if (nc_field > 0) nc_field--; }
+                else if (ui_joy_pressed & BTN_DOWN)  { if (nc_field < 4) nc_field++; }
+                else if (ui_joy_pressed & BTN_RIGHT) ctl = nc_inc[nc_field];
+                else if (ui_joy_pressed & BTN_LEFT)  ctl = nc_dec[nc_field];
+                if (!ctl) {
+                    char cur[40];
+                    snprintf(cur, sizeof(cur), "%-12s  LR=change  A=OK",
+                             nc_labels[nc_field]);
+                    ui_status(cur);
+                }
+                KLog("NewCommander joypad: joy=%04X nc_field=%d ctl=%d",
+                     (int)ui_joy_pressed, nc_field, ctl);
+                break;
+            }
+
+            /* System Information – main docked screen */
+            case SystemInformationForm:
+                if      (ui_joy_pressed & BTN_A)     kdown_chr = 'w';
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_C)     kdown_chr = 's';
+                else if (ui_joy_pressed & BTN_START) kdown_chr = 'y';
+                else if (ui_joy_pressed & BTN_UP)    ctl = SystemInformationSpecialButton;
+                else if (ui_joy_pressed & BTN_DOWN)  ctl = SystemInformationNewsButton;
+                break;
+
+            case WarpForm:
+            case GalacticChartForm:
+                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                else if (ui_joy_pressed & BTN_START) kdown_chr = 'y';
+                break;
+
+            case ExecuteWarpForm:
+                if      (ui_joy_pressed & BTN_A)     ctl = ExecuteWarpWarpButton;
+                else if (ui_joy_pressed & BTN_B)     ctl = ExecuteWarpChartButton;
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                break;
+
+            case EncounterForm:
+                if      (ui_joy_pressed & BTN_A)     ctl = EncounterAttackButton;
+                else if (ui_joy_pressed & BTN_B)     ctl = EncounterFleeButton;
+                else if (ui_joy_pressed & BTN_C)     ctl = EncounterIgnoreButton;
+                else if (ui_joy_pressed & BTN_START) ctl = EncounterInterruptButton;
+                break;
+
+            case BuyCargoForm:
+                if      (ui_joy_pressed & BTN_A)     ctl = BuyCargoQty0Button;
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                else if (ui_joy_pressed & BTN_START) kdown_chr = 'y';
+                break;
+
+            case SellCargoForm:
+                if      (ui_joy_pressed & BTN_A)     ctl = SellCargoQty0Button;
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                else if (ui_joy_pressed & BTN_START) kdown_chr = 'y';
+                break;
+
+            case ShipYardForm:
+                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                break;
+
+            case BuyShipForm:
+                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                break;
+
+            case BuyEquipmentForm:
+                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                break;
+
+            case SellEquipmentForm:
+                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                break;
+
+            case CommanderStatusForm:
+            case CurrentShipForm:
+            case QuestsForm:
+                if      (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                break;
+
+            case BankForm:
+                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                break;
+
+            case PersonnelRosterForm:
+                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
+                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
+                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
+                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
+                break;
+
+            case SpecialEventForm:
+            case SpecialCargoForm:
+                if (ui_joy_pressed & BTN_A) kdown_chr = chrReturn;
+                break;
+
+            default:
+                break;
+        }
+
+        if (ctl != 0) {
+            KLog("EvtGet: ctlSelect ctl=%d form=%d", ctl, (int)ui_current_form);
+            ep->eType = ctlSelectEvent;
+            ep->data.ctlSelect.controlID = (uint16_t)ctl;
+            return;
+        }
+        if (kdown_chr != 0) {
+            KLog("EvtGet: keyDown chr=0x%04X form=%d", (int)kdown_chr, (int)ui_current_form);
+            ep->eType = keyDownEvent;
+            ep->data.keyDown.chr = kdown_chr;
+            return;
+        }
+    }
+
+    /* Generic fallback */
     if (ui_joy_pressed & BTN_UP)
     { ep->eType = keyDownEvent; ep->data.keyDown.chr = chrUpArrow; return; }
     if (ui_joy_pressed & BTN_DOWN)
@@ -678,12 +896,15 @@ __attribute__((used)) void GEN_EvtGetEvent(EventType* ep, int32_t timeout)
     if (ui_joy_pressed & BTN_A)
     { ep->eType = keyDownEvent; ep->data.keyDown.chr = chrReturn; return; }
     if (ui_joy_pressed & BTN_B)
-    { ep->eType = keyDownEvent; ep->data.keyDown.chr = 0x1B /* ESC */; return; }
+    { ep->eType = keyDownEvent; ep->data.keyDown.chr = 0x1B; return; }
     if (ui_joy_pressed & BTN_LEFT)
     { ep->eType = keyDownEvent; ep->data.keyDown.chr = chrPageUp; return; }
     if (ui_joy_pressed & BTN_RIGHT)
     { ep->eType = keyDownEvent; ep->data.keyDown.chr = chrPageDown; return; }
 
+    /* Log non-nil events for debugging */
+    if (ep->eType != nilEvent)
+        KLog("EvtGet: eType=%d form=%d", (int)ep->eType, (int)ui_current_form);
     ep->eType = nilEvent;
 }
 
