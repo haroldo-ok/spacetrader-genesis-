@@ -142,7 +142,7 @@ static void difficulty_screen(void)
  * Main entry point (SGDK calls int main())
  * --------------------------------------------------------------------- */
 /* SGDK 1.70 expects main() to return bool */
-bool main(void)
+int main(void)
 {
     /* ── Hardware setup ── */
     VDP_setScreenWidth320();
@@ -240,5 +240,5 @@ bool main(void)
 
     /* Halt */
     for (;;) ui_vsync();
-    return FALSE;
+    return 0;
 }

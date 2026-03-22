@@ -714,7 +714,7 @@ __attribute__((used)) void GEN_EvtGetEvent(EventType* ep, int32_t timeout)
 
     if (_pending_form_open)
     {
-        KLOG("EvtGetEvent: delivering frmOpenEvent for form %d", ui_current_form);
+        kprintf("EvtGetEvent: delivering frmOpenEvent for form %d", ui_current_form);
         ep->eType          = frmOpenEvent;
         ep->data.frmOpen.formID = ui_current_form;
         _pending_form_open = 0;
