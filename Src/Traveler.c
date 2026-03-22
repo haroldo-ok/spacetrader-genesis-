@@ -1,5 +1,5 @@
 /* Genesis port: SRAM needed for high scores */
-#include <genesis.h>
+#include "genesis.h"
 /***********************************************************************
  *
  * SPACE TRADER 1.2.0

@@ -9,11 +9,47 @@
 #ifndef PALMCOMPAT_H
 #define PALMCOMPAT_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
+/* SGDK 1.70: no stdlib headers available in the cross-compiler.
+ * genesis.h (included first by every .c) provides types.h which gives us
+ * u8/u16/u32/s8/s16/s32/bool/TRUE/FALSE/NULL.
+ * We map those to the Palm OS type names here. */
+#include "genesis.h"
+
+/* ── Standard integer types from SGDK's types.h ──────────────────────── */
+/* u8/u16/u32/s8/s16/s32 are already defined by genesis.h → types.h      */
+#ifndef _STDINT_DEFINED
+#define _STDINT_DEFINED
+typedef u8   uint8_t;
+typedef u16  uint16_t;
+typedef u32  uint32_t;
+typedef s8   int8_t;
+typedef s16  int16_t;
+typedef s32  int32_t;
+#endif /* _STDINT_DEFINED */
+/* size_t: ensure it is defined before we use it in snprintf declaration.
+ * SGDK's string.h defines it, but we need it here too since palmcompat.h
+ * uses it in macros. Guard against redefinition. */
+#ifndef __SIZE_T
+#define __SIZE_T
+typedef u32 size_t;
+#endif
+/* intptr_t for pointer casts */
+#ifndef _INTPTR_T_DEFINED
+#define _INTPTR_T_DEFINED
+typedef s32 intptr_t;
+#endif
+
+/* ── String / memory functions ──────────────────────────────────────────── */
+/* GCC knows the prototypes for standard C library functions as built-ins.  */
+/* SGDK 1.70 ships m68k-elf-gcc with newlib; these are available at link    */
+/* time without needing explicit header includes.                            */
+/* We declare only what GCC won't implicitly know (non-standard ones).      */
+/* sprintf/snprintf/atoi declared by SGDK's genesis.h -> string.h.
+ * strcasecmp may not be in SGDK's string.h; provide it only if absent. */
+#ifndef _STRCASECMP_DECLARED
+#define _STRCASECMP_DECLARED
+extern int strcasecmp(const char* a, const char* b);
+#endif
 
 /* -----------------------------------------------------------------------
  * Primitive type aliases
@@ -37,9 +73,7 @@ typedef int16_t   Coord;
 #define false 0
 
 /* Palm Boolean */
-#ifndef NULL
-#define NULL ((void*)0)
-#endif
+/* NULL, TRUE, FALSE already defined by SGDK genesis.h / types.h */
 
 /* -----------------------------------------------------------------------
  * Palm OS integer limits
@@ -51,13 +85,21 @@ typedef int16_t   Coord;
  * Math helpers from Palm OS headers
  * --------------------------------------------------------------------- */
 #ifndef min
+#ifndef min
 #define min(a,b) ((a)<(b)?(a):(b))
 #endif
+#endif
+#ifndef max
 #ifndef max
 #define max(a,b) ((a)>(b)?(a):(b))
 #endif
+#endif
+#ifndef SQR
 #define SQR(x) ((x)*(x))
+#endif
+#ifndef abs
 #define abs(x) ((x)<0 ? -(x) : (x))
+#endif
 
 /* -----------------------------------------------------------------------
  * String functions – Palm names -> C stdlib
@@ -510,6 +552,9 @@ extern ControlType _gen_dummy_control;
 
 /* DrawCircle is defined in WarpFormEvent.c (non-static) */
 
+/* MenuEraseStatus – Palm OS menu helper; no-op stub in compat.c */
+extern void MenuEraseStatus(void* menuPtr);
+
 /* -----------------------------------------------------------------------
  * Char typedef guard
  * --------------------------------------------------------------------- */
@@ -527,8 +572,11 @@ typedef char Char;
 /* -----------------------------------------------------------------------
  * FormEventHandlerType – function pointer type for form event handlers
  * --------------------------------------------------------------------- */
-typedef Boolean (*FormEventHandlerType)(EventType* ep);
-typedef FormEventHandlerType FormEventHandlerPtr;
+/* FormEventHandlerType is the bare function type (not pointer).
+ * AppHandleEvent.c declares: FormEventHandlerType* Set;
+ * which makes Set a proper function pointer. */
+typedef Boolean (FormEventHandlerType)(EventType* ep);
+typedef Boolean (*FormEventHandlerPtr)(EventType* ep);
 
 /* -----------------------------------------------------------------------
  * winEnterEvent and other window event types
@@ -550,13 +598,7 @@ typedef FormEventHandlerType FormEventHandlerPtr;
  * --------------------------------------------------------------------- */
 /* Already defined in spacetrader.h as TINY=0..HUGE=4 */
 
-/* -----------------------------------------------------------------------
- * TRUE/FALSE for legacy code
- * --------------------------------------------------------------------- */
-#ifndef TRUE
-#define TRUE  1
-#define FALSE 0
-#endif
+/* TRUE/FALSE already defined by SGDK types.h — no redefinition needed */
 
 /* -----------------------------------------------------------------------
  * BitmapPtr->width access in Merchant.c's GetBitmapWidth/Height

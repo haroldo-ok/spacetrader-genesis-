@@ -17,7 +17,7 @@
 #ifndef UI_H
 #define UI_H
 
-#include <genesis.h>
+#include "genesis.h"
 #include "palmcompat.h"
 
 /* -----------------------------------------------------------------------

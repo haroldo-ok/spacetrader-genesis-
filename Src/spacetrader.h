@@ -434,17 +434,21 @@
 #define MOON 2
 
 // size of a UInt16
+#undef  MAX_WORD
 #define MAX_WORD 65535
 
 // these have been added to avoid tracking down the math library.
-#define min( a, b ) ( (a) <= (b) ? (a) : (b) )
-#define max( a, b ) ( (a) >= (b) ? (a) : (b) )
+#undef  min
+#define min(a,b) ((a)<=(b)?(a):(b))
+#undef  max
+#define max(a,b) ((a)>=(b)?(a):(b))
 
 
 #define GetRandom( a ) (SysRandom( 0 )%(a))
 #define TOLOWER( a ) ((a) >= 'A' && (a) <= 'Z' ? (a) - 'A' + 'a' : (a))
 #define ABS( a ) ((a) < 0 ? (-(a)) : (a))
-#define SQR( a ) ((a) * (a))
+#undef  SQR
+#define SQR(a) ((a)*(a))
 #define COMMANDER Mercenary[0]
 #define CURSYSTEM SolarSystem[COMMANDER.CurSystem]
 #define BASEWEAPONPRICE( a ) (BasePrice( Weapontype[a].TechLevel, Weapontype[a].Price ))
@@ -465,7 +469,8 @@
 #define STRENGTHPOLICE( a ) (PoliceRecordScore < PSYCHOPATHSCORE ? 3 * Politics[SolarSystem[a].Politics].StrengthPolice : (PoliceRecordScore < VILLAINSCORE ? 2 * Politics[SolarSystem[a].Politics].StrengthPolice : Politics[SolarSystem[a].Politics].StrengthPolice))
 #define STARTCOUNTDOWN (3 + Difficulty)
 
-#define BELOW50	(romVersion < sysMakeROMVersion( 5, 0, 0, sysROMStageRelease, 0 ))				
+#undef  BELOW50
+#define BELOW50 (0)				
 
 #define __SPACETRADER_INC__
 
