@@ -1300,7 +1300,7 @@ void ClearHighScores( void )
 Boolean StartNewGame( void )
 {
 	int i, j, k, d, x, y;
-	KLog("StartNewGame: entry, NameCommander='%s' Difficulty=%d",
+	kprintf("StartNewGame: entry, NameCommander='%s' Difficulty=%d",
 	     NameCommander, (int)Difficulty);
 	Boolean Redo, CloseFound, FreeWormhole;
 
@@ -2545,12 +2545,12 @@ Boolean NewCommanderFormHandleEvent(EventPtr eventP)
    int  CommanderNameLen;
    Boolean handled = false;
    FormPtr frmP = FrmGetActiveForm();
-	KLog("NewCmdForm: eType=%d", (int)eventP->eType);
+	kprintf("NewCmdForm: eType=%d", (int)eventP->eType);
 	switch (eventP->eType) 
 	{
 		case ctlSelectEvent:
 			// Closing the New Commander screen
-			KLog("NewCmdForm: ctlSelect controlID=%d OKButton=%d",
+			kprintf("NewCmdForm: ctlSelect controlID=%d OKButton=%d",
 			     (int)eventP->data.ctlSelect.controlID, (int)NewCommanderOKButton);
 			if (eventP->data.ctlSelect.controlID == NewCommanderOKButton)
 			{
@@ -2563,7 +2563,7 @@ Boolean NewCommanderFormHandleEvent(EventPtr eventP)
 				}
 
 				GetField( frmP, NewCommanderEditNameField, NameCommander, NameH );
-				KLog("NewCmdForm: OK pressed, name='%s' Pilot=%d Fight=%d Trade=%d Eng=%d",
+				kprintf("NewCmdForm: OK pressed, name='%s' Pilot=%d Fight=%d Trade=%d Eng=%d",
 				     NameCommander, (int)COMMANDER.Pilot, (int)COMMANDER.Fighter,
 				     (int)COMMANDER.Trader, (int)COMMANDER.Engineer);
 				DeterminePrices(COMMANDER.CurSystem);
@@ -2643,7 +2643,7 @@ Boolean NewCommanderFormHandleEvent(EventPtr eventP)
 			break;
 
 		case frmOpenEvent:
-			KLog("NewCmdForm: frmOpenEvent - init NameH and draw skills");
+			kprintf("NewCmdForm: frmOpenEvent - init NameH and draw skills");
 			// Set Commander name and skills	
 			CommanderNameLen = NAMELEN+1;
 			NameH = SetField( frmP, NewCommanderEditNameField, NameCommander, CommanderNameLen, true );

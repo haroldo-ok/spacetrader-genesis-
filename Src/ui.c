@@ -551,7 +551,7 @@ _form_titles[] = {
 __attribute__((used)) void GEN_FrmGotoForm(int formID)
 {
     int i;
-    KLog("FrmGotoForm: formID=%d (was %d)", formID, (int)ui_current_form);
+    kprintf("FrmGotoForm: formID=%d (was %d)", formID, (int)ui_current_form);
     ui_current_form    = formID;
     _pending_form_open = 1;
 
@@ -760,7 +760,7 @@ __attribute__((used)) void GEN_EvtGetEvent(EventType* ep, int32_t timeout)
                              nc_labels[nc_field]);
                     ui_status(cur);
                 }
-                KLog("NewCommander joypad: joy=%04X nc_field=%d ctl=%d",
+                kprintf("NewCommander joypad: joy=%04X nc_field=%d ctl=%d",
                      (int)ui_joy_pressed, nc_field, ctl);
                 break;
             }
@@ -875,13 +875,13 @@ __attribute__((used)) void GEN_EvtGetEvent(EventType* ep, int32_t timeout)
         }
 
         if (ctl != 0) {
-            KLog("EvtGet: ctlSelect ctl=%d form=%d", ctl, (int)ui_current_form);
+            kprintf("EvtGet: ctlSelect ctl=%d form=%d", ctl, (int)ui_current_form);
             ep->eType = ctlSelectEvent;
             ep->data.ctlSelect.controlID = (uint16_t)ctl;
             return;
         }
         if (kdown_chr != 0) {
-            KLog("EvtGet: keyDown chr=0x%04X form=%d", (int)kdown_chr, (int)ui_current_form);
+            kprintf("EvtGet: keyDown chr=0x%04X form=%d", (int)kdown_chr, (int)ui_current_form);
             ep->eType = keyDownEvent;
             ep->data.keyDown.chr = kdown_chr;
             return;
@@ -904,7 +904,7 @@ __attribute__((used)) void GEN_EvtGetEvent(EventType* ep, int32_t timeout)
 
     /* Log non-nil events for debugging */
     if (ep->eType != nilEvent)
-        KLog("EvtGet: eType=%d form=%d", (int)ep->eType, (int)ui_current_form);
+        kprintf("EvtGet: eType=%d form=%d", (int)ep->eType, (int)ui_current_form);
     ep->eType = nilEvent;
 }
 
