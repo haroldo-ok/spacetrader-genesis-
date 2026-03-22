@@ -8,6 +8,8 @@
 This is a complete source-level port of Pieter Spronck's **Space Trader 1.2.0**
 (Palm OS, 2002) to the **Sega Genesis / Mega Drive** using **SGDK 1.70**.
 
+The porting process was mostly vibe-coded using the free version of Claude.
+
 The game logic (trading economy, encounters, ships, combat, quests, galaxy map)
 is preserved verbatim from the original C source.  The Palm OS UI toolkit,
 event system, database API, and bitmap resources are replaced by a Genesis-native
