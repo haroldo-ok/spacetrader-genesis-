@@ -535,6 +535,9 @@ static void AppEventLoop(void)
             GEN_EvtGetEvent(&event, -1);
         }
 
+        if (event.eType != nilEvent)
+            kprintf("AppEventLoop: dispatching eType=%d CurForm=%d",
+                    (int)event.eType, (int)CurForm);
         if (!AppHandleEvent(&event))
             FrmDispatchEvent(&event);
 

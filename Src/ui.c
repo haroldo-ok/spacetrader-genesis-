@@ -517,8 +517,15 @@ void ui_draw_galaxy_map(void)
 
 /* Form navigation – sets ui_current_form; the main loop calls the
  * appropriate screen handler after each FrmGotoForm call. */
-/* Pending frmOpenEvent flag (set by GEN_FrmGotoForm, cleared by GEN_EvtGetEvent) */
+/* Pending frmOpenEvent flag */
 static int _pending_form_open = 0;
+/* Form handler registry (populated by GEN_FrmSetEventHandler) */
+#define MAX_FORM_HANDLERS 32
+static struct {
+    int                  formID;
+    FormEventHandlerType *handler;
+} _form_handlers[MAX_FORM_HANDLERS];
+static int _form_handler_count = 0;
 
 /* Form title / hint lookup table */
 static const struct { int id; const char* title; const char* hint; }
@@ -558,11 +565,15 @@ __attribute__((used)) void GEN_FrmGotoForm(int formID)
      * the form-specific handler via FrmSetEventHandler. */
     {
         EventType load_ev;
+        Boolean handled;
         memset(&load_ev, 0, sizeof(load_ev));
         load_ev.eType              = frmLoadEvent;
         load_ev.data.frmLoad.formID = (uint16_t)formID;
-        AppHandleEvent(&load_ev);
-        kprintf("FrmGotoForm: frmLoadEvent dispatched for %d", formID);
+        kprintf("FrmGotoForm: calling AppHandleEvent with frmLoadEvent=%d formID=%d",
+                (int)frmLoadEvent, formID);
+        handled = AppHandleEvent(&load_ev);
+        kprintf("FrmGotoForm: frmLoadEvent handled=%d, handlers_registered=%d",
+                (int)handled, _form_handler_count);
     }
     _pending_form_open = 1; /* frmOpenEvent delivered on next GEN_EvtGetEvent */
 
@@ -600,13 +611,6 @@ __attribute__((used)) FormPtr GEN_FrmGetActiveForm(void)
  * FrmDispatchEvent() invokes for every event on the active form.
  * We maintain a table of (formID → handler) pairs.
  * --------------------------------------------------------------------- */
-#define MAX_FORM_HANDLERS 32
-static struct {
-    int                  formID;
-    FormEventHandlerType *handler;
-} _form_handlers[MAX_FORM_HANDLERS];
-static int _form_handler_count = 0;
-
 __attribute__((used)) void GEN_FrmSetEventHandler(FormPtr frm, void* handler)
 {
     int id = (int)(intptr_t)frm;
@@ -631,6 +635,8 @@ __attribute__((used)) void GEN_FrmSetEventHandler(FormPtr frm, void* handler)
 __attribute__((used)) Boolean GEN_FrmDispatchEvent(EventType* ep)
 {
     int i;
+    kprintf("FrmDispatchEvent: eType=%d curForm=%d handlers=%d",
+            (int)ep->eType, (int)ui_current_form, _form_handler_count);
     for (i = 0; i < _form_handler_count; i++) {
         if (_form_handlers[i].formID == ui_current_form) {
             if (_form_handlers[i].handler) {
