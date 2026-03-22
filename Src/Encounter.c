@@ -1382,7 +1382,7 @@ static void DrawEncounterForm()
 		DrawChars( SBuf, 6, 88 );
 	}			
 
-	d = sqrt( Ship.Tribbles/250 );
+	d = sqrt( (int)(Ship.Tribbles/250) );
 	for (i=0; i<d; ++i)
 	{
 		objindex = FrmGetObjectIndex( frmP, EncounterTribble0Button +

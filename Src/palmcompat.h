@@ -552,6 +552,9 @@ extern ControlType _gen_dummy_control;
 
 /* DrawCircle is defined in WarpFormEvent.c (non-static) */
 
+/* MenuEraseStatus – Palm OS menu helper; no-op stub in compat.c */
+extern void MenuEraseStatus(void* menuPtr);
+
 /* -----------------------------------------------------------------------
  * Char typedef guard
  * --------------------------------------------------------------------- */

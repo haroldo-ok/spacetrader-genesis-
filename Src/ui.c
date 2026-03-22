@@ -18,16 +18,13 @@
 /* external.h → spacetrader.h; brings in game types and global externs */
 #include "external.h"
 
-/* va_list / vsnprintf — declared after genesis.h so size_t is known.
- * SGDK's string.h (included by genesis.h) declares vsnprintf returning u16. */
-#ifndef _VA_LIST_DEFINED
-#define _VA_LIST_DEFINED
+/* va_list — GCC builtin type; may not be typedef'd by SGDK's string.h */
+#ifndef _VA_LIST
+#define _VA_LIST
 typedef __builtin_va_list va_list;
-#define va_start(v,l)  __builtin_va_start(v,l)
-#define va_end(v)      __builtin_va_end(v)
-#define va_arg(v,t)    __builtin_va_arg(v,t)
 #endif
-/* vsnprintf is declared by SGDK's string.h; no re-declaration needed. */
+/* va_start/va_end/va_arg are defined as macros by SGDK's string.h via
+ * __builtin_va_start etc.  vsnprintf/snprintf implemented in compat.c. */
 
 /* -----------------------------------------------------------------------
  * Globals
