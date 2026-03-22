@@ -58,12 +58,13 @@ static void show_splash(void)
     ui_printf(0, 25, PAL_DIM,    "  A=New Game  B=Load Save     ");
 
     /* Wait for A or B */
+    kprintf("show_splash: waiting for input");
     for (;;)
     {
         ui_vsync();
-        if (ui_joy_pressed & BTN_A) return;
-        if (ui_joy_pressed & BTN_B) return;
-        if (ui_joy_pressed & BTN_START) return;
+        if (ui_joy_pressed & BTN_A) { kprintf("show_splash: A pressed"); return; }
+        if (ui_joy_pressed & BTN_B) { kprintf("show_splash: B pressed"); return; }
+        if (ui_joy_pressed & BTN_START) { kprintf("show_splash: Start pressed"); return; }
     }
 }
 
@@ -71,26 +72,51 @@ static void show_splash(void)
  * Commander-name entry screen (replaces Palm's NewCommanderForm)
  * Shown when there is no save, or user chose New Game.
  * --------------------------------------------------------------------- */
+/* Preset commander names the player can cycle through */
+static const char* _preset_names[] = {
+    "Jameson", "Shelby", "Morgan", "Blake", "Quinn",
+    "Reyes", "Hayashi", "Novak", "Cruz", "Okafor"
+};
+#define NUM_PRESET_NAMES 10
+
 static void commander_name_screen(void)
 {
+    int name_idx = 0;
+
+    kprintf("commander_name_screen: entry");
+    strncpy(NameCommander, _preset_names[name_idx], NAMELEN);
+    NameCommander[NAMELEN] = '\0';
+
     ui_clear_screen();
     ui_title("NEW COMMANDER");
-    ui_printf(0, UI_BODY_TOP, PAL_NORMAL,
-              "Choose your name, pilot:");
-
-    UITextInput ti;
-    ui_textinput_init(&ti, NAMELEN, UI_BODY_TOP + 2, UI_BODY_TOP + 1);
-    ui_textinput_draw(&ti);
+    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL,  "Choose your commander name:");
+    ui_printf(0, UI_BODY_TOP + 3, PAL_HILIGHT, "> %-20s", NameCommander);
+    ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL,  "LR = cycle names");
+    ui_status("A=Accept  LR=Next/Prev name");
+    kprintf("commander_name_screen: screen drawn");
 
     for (;;)
     {
         ui_vsync();
-        if (ui_textinput_update(&ti))
+
+        if (ui_joy_pressed & BTN_A)
         {
-            /* Copy into global NameCommander */
-            strncpy(NameCommander, ti.buf, NAMELEN);
-            NameCommander[NAMELEN] = '\0';
+            kprintf("commander_name_screen: accepted name=%s", NameCommander);
             return;
+        }
+        if (ui_joy_pressed & BTN_RIGHT)
+        {
+            name_idx = (name_idx + 1) % NUM_PRESET_NAMES;
+            strncpy(NameCommander, _preset_names[name_idx], NAMELEN);
+            NameCommander[NAMELEN] = '\0';
+            ui_printf(0, UI_BODY_TOP + 3, PAL_HILIGHT, "> %-20s", NameCommander);
+        }
+        if (ui_joy_pressed & BTN_LEFT)
+        {
+            name_idx = (name_idx + NUM_PRESET_NAMES - 1) % NUM_PRESET_NAMES;
+            strncpy(NameCommander, _preset_names[name_idx], NAMELEN);
+            NameCommander[NAMELEN] = '\0';
+            ui_printf(0, UI_BODY_TOP + 3, PAL_HILIGHT, "> %-20s", NameCommander);
         }
     }
 }
@@ -108,6 +134,7 @@ static const char* _diff_names[] = {
 
 static void difficulty_screen(void)
 {
+    kprintf("difficulty_screen: entry");
     ui_clear_screen();
     ui_title("SELECT DIFFICULTY");
     ui_printf(0, UI_BODY_TOP, PAL_NORMAL,
@@ -127,12 +154,14 @@ static void difficulty_screen(void)
         if (sel >= 0)
         {
             Difficulty = (Byte)sel;
+            kprintf("difficulty_screen: selected %d", (int)sel);
             return;
         }
         /* B = default Normal */
         if (ui_joy_pressed & BTN_B)
         {
             Difficulty = NORMAL;
+            kprintf("difficulty_screen: defaulted to NORMAL");
             return;
         }
     }
