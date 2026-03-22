@@ -34,6 +34,7 @@
 
 /* Genesis port: bitmap internals access not needed (BELOW40 is always false) */
 #include "external.h"
+#include "compat.h"
 #include "ui.h"
 
 #define ourMinVersion	sysMakeROMVersion(2,0,0,sysROMStageRelease,0)
