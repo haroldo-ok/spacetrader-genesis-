@@ -171,7 +171,8 @@ static void difficulty_screen(void)
  * Main entry point (SGDK calls int main())
  * --------------------------------------------------------------------- */
 /* SGDK 1.70 expects main() to return bool */
-int main(void)
+/* SGDK 1.70: main() returns bool (u16). Use u16 to match LTO signature. */
+u16 main(void)
 {
     /* ── Hardware setup ── */
     VDP_setScreenWidth320();
@@ -271,3 +272,4 @@ int main(void)
     for (;;) ui_vsync();
     return 0;
 }
+

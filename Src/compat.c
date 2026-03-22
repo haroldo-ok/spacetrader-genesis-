@@ -122,3 +122,39 @@ void MenuEraseStatus(void* menuPtr)
 {
     (void)menuPtr;
 }
+
+/* -----------------------------------------------------------------------
+ * FntCharsInWidth – Palm OS font text-width helper used by Draw.c
+ * Approximates character widths at 6 pixels each (8x8 font).
+ * --------------------------------------------------------------------- */
+void FntCharsInWidth(const char* s, s16* w, s16* len, u8* fits)
+{
+    int maxw = w ? *w : 160;
+    int slen = s ? (int)strlen(s) : 0;
+    int actual_len = (len && *len > 0 && *len < slen) ? *len : slen;
+    int used = actual_len * 6;  /* 6 pixels per char, 8x8 font */
+
+    if (fits) *fits = (used <= maxw);
+    if (used > maxw && len) {
+        *len  = (s16)(maxw / 6);
+        used  = *len * 6;
+    } else if (len) {
+        *len = (s16)actual_len;
+    }
+    if (w) *w = (s16)used;
+}
+
+/* -----------------------------------------------------------------------
+ * strncmp – in case libmd.a doesn't provide it
+ * Marked weak so libmd's version wins if present.
+ * --------------------------------------------------------------------- */
+__attribute__((weak))
+int strncmp(const char* a, const char* b, u32 n)
+{
+    while (n > 0 && *a && *b) {
+        if ((u8)*a != (u8)*b) return (int)(u8)*a - (int)(u8)*b;
+        a++; b++; n--;
+    }
+    if (n == 0) return 0;
+    return (int)(u8)*a - (int)(u8)*b;
+}
