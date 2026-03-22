@@ -14,7 +14,7 @@
  * u8/u16/u32/s8/s16/s32/bool/TRUE/FALSE/NULL.
  * We map those to the Palm OS type names here. */
 #include "genesis.h"
-#include "compat.h"  /* snprintf, memmove, SRAM_buffer, etc. */
+#include "compat.h"  /* snprintf, memmove, SRAM_buffer etc. */
 
 /* ── Standard integer types from SGDK's types.h ──────────────────────── */
 /* u8/u16/u32/s8/s16/s32 are already defined by genesis.h → types.h      */
@@ -507,9 +507,6 @@ typedef int16_t Int16;
 #define BELOW50 (0)
 #endif
 
-/* sram_save_full / sram_load_full – declared after DataTypes.h is included.
- * These are defined in ui.c and called from Merchant.c / Traveler.c.
- * The actual prototypes appear in ui.h which is included where needed. */
 extern Boolean sram_has_save(void);
 
 /* AmountH is a local variable in Field.c – no extern needed */
@@ -552,6 +549,9 @@ extern ControlType _gen_dummy_control;
 /* Already named penDown in the EventType union above */
 
 /* DrawCircle is defined in WarpFormEvent.c (non-static) */
+
+/* MenuEraseStatus – Palm OS menu helper; no-op stub in compat.c */
+extern void MenuEraseStatus(void* menuPtr);
 
 /* -----------------------------------------------------------------------
  * Char typedef guard
