@@ -11,9 +11,15 @@
  *   • All Palm OS API stubs called from palmcompat.h macros
  */
 
-#include <genesis.h>
-/* SGDK 1.70: no stdlib headers — types and string functions come from genesis.h
- * via palmcompat.h. We declare stdarg ourselves for vsnprintf. */
+/* genesis.h first — defines u8/u16/u32, size_t (via string.h), min/max, etc. */
+#include "genesis.h"
+/* ui.h → palmcompat.h → genesis.h (guarded); brings in all Palm compat types */
+#include "ui.h"
+/* external.h → spacetrader.h; brings in game types and global externs */
+#include "external.h"
+
+/* va_list / vsnprintf — declared after genesis.h so size_t is known.
+ * SGDK's string.h (included by genesis.h) declares vsnprintf returning u16. */
 #ifndef _VA_LIST_DEFINED
 #define _VA_LIST_DEFINED
 typedef __builtin_va_list va_list;
@@ -21,9 +27,7 @@ typedef __builtin_va_list va_list;
 #define va_end(v)      __builtin_va_end(v)
 #define va_arg(v,t)    __builtin_va_arg(v,t)
 #endif
-extern int vsnprintf(char* buf, size_t n, const char* fmt, va_list ap);
-#include "ui.h"
-#include "external.h"   /* for SOLARSYSTEM, SolarSystem[], etc. */
+/* vsnprintf is declared by SGDK's string.h; no re-declaration needed. */
 
 /* -----------------------------------------------------------------------
  * Globals
