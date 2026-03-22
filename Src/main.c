@@ -17,7 +17,7 @@
  *                      [2 bytes hs-magic][MAXHIGHSCORE * sizeof(HIGHSCORE)]
  */
 
-#include <genesis.h>
+#include "genesis.h"
 #include "external.h"   /* all game types + global externs */
 #include "ui.h"         /* Genesis UI engine */
 

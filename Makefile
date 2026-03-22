@@ -29,8 +29,9 @@ OBJS := $(OUT)/obj
 # and the original Merchant entry point (now replaced by main.c + GenApp*).
 #
 SRC_EXCLUDE := SetField.c
+# Exclude SGDK boot stubs (compiled separately by SGDK linker scripts)
+SRC_C_ALL := $(filter-out src/boot/%, $(wildcard src/*.c))
 
-SRC_C_ALL := $(wildcard src/*.c)
 SRC_C     := $(filter-out $(addprefix src/,$(SRC_EXCLUDE)),$(SRC_C_ALL))
 
 # ── Extra include paths ──────────────────────────────────────────────────────

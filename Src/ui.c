@@ -12,9 +12,16 @@
  */
 
 #include <genesis.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <string.h>
+/* SGDK 1.70: no stdlib headers — types and string functions come from genesis.h
+ * via palmcompat.h. We declare stdarg ourselves for vsnprintf. */
+#ifndef _VA_LIST_DEFINED
+#define _VA_LIST_DEFINED
+typedef __builtin_va_list va_list;
+#define va_start(v,l)  __builtin_va_start(v,l)
+#define va_end(v)      __builtin_va_end(v)
+#define va_arg(v,t)    __builtin_va_arg(v,t)
+#endif
+extern int vsnprintf(char* buf, size_t n, const char* fmt, va_list ap);
 #include "ui.h"
 #include "external.h"   /* for SOLARSYSTEM, SolarSystem[], etc. */
 
@@ -65,9 +72,9 @@ void ui_init(void)
     PAL_setColors(0, ui_palette, 16, CPU);
 
     /* Use SGDK built-in font (already loaded) */
-    VDP_setPlane(BG_B);   /* draw to BG_B */
-    VDP_clearPlane(BG_B, TRUE);
+    /* VDP_setPlane not needed in SGDK 1.70 - text goes to BG_A */
     VDP_clearPlane(BG_A, TRUE);
+    VDP_clearPlane(BG_B, TRUE);
 
     ui_frame_count   = 0;
     ui_current_form  = 0;
@@ -95,6 +102,7 @@ void ui_vsync(void)
  * --------------------------------------------------------------------- */
 void ui_clear_screen(void)
 {
+    VDP_clearPlane(BG_A, TRUE);
     VDP_clearPlane(BG_B, TRUE);
 }
 
@@ -110,12 +118,12 @@ void ui_clear_row(uint8_t row)
     char spaces[UI_COLS + 1];
     memset(spaces, ' ', UI_COLS);
     spaces[UI_COLS] = '\0';
-    VDP_drawTextBG(BG_B, spaces, 0, row);
+    VDP_clearTextLine(row);
 }
 
 /*
  * ui_print – draw string s at (col, row) with palette index pal.
- * SGDK's VDP_drawTextBG always uses palette 0 attribute.
+ * SGDK 1.70: VDP_drawText() writes to BG_A with current text palette.
  * To use different "palettes" (colour attributes) we set the tile
  * attribute word manually.
  *
@@ -126,13 +134,14 @@ void ui_clear_row(uint8_t row)
  */
 void ui_print(uint8_t col, uint8_t row, uint8_t pal, const char* s)
 {
-    /* SGDK VDP_drawTextBG takes (plane, text, x_tile, y_tile) */
-    /* For pal != PAL_NORMAL we prefix a decoration character */
-    if (pal == PAL_TITLE || pal == PAL_STATUS)
-        VDP_drawTextBG(BG_B, s, col, row);
-    else
-        VDP_drawTextBG(BG_B, s, col, row);
-    (void)pal;
+    /* SGDK 1.70: use text palette to indicate colour, then draw */
+    /* Palette mapping: 0=white(normal), 1=yellow(hilight), 2=cyan(title),
+     *                  3=green(status), 4=red(warn), 5=grey(dim) */
+    static const uint8_t _pal_map[] = {0, 0, 1, 2, 3, 0};
+    uint8_t vdp_pal = (pal < 6) ? _pal_map[pal] : 0;
+    VDP_setTextPalette(vdp_pal);
+    VDP_drawText(s, col, row);
+    VDP_setTextPalette(0);  /* restore default */
 }
 
 void ui_printf(uint8_t col, uint8_t row, uint8_t pal, const char* fmt, ...)
