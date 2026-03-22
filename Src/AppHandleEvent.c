@@ -472,7 +472,8 @@ Boolean AppHandleEvent( EventPtr eventP)
 
 	Set = 0L;
 	Dock = -1;
-	kprintf("AppHandleEvent: eType=%d CurForm=%d", (int)eventP->eType, (int)CurForm);
+	if (eventP->eType != nilEvent)
+		kprintf("AppHandleEvent: eType=%d CurForm=%d", (int)eventP->eType, (int)CurForm);
 
 	if (eventP->eType == frmLoadEvent)
 	{

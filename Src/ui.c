@@ -531,7 +531,7 @@ static int _form_handler_count = 0;
 static const struct { int id; const char* title; const char* hint; }
 _form_titles[] = {
     { MainForm,              "SPACE TRADER",      "A=New Game" },
-    { NewCommanderForm,      "NEW COMMANDER",     "UP/DN=field LR=value A=OK" },
+    { NewCommanderForm,      "NEW COMMANDER",     "UP/DN=field  LR=value  A=OK" },
     { SystemInformationForm, "SYSTEM INFO",       "A=Warp B=Buy C=Sell S=Yard" },
     { GalacticChartForm,     "GALACTIC CHART",    "A=Warp B=Back" },
     { WarpForm,              "WARP",              "A=Confirm B=Back" },
@@ -585,6 +585,15 @@ __attribute__((used)) void GEN_FrmGotoForm(int formID)
         {
             ui_title(_form_titles[i].title);
             ui_status(_form_titles[i].hint);
+            /* Draw static labels for forms that need them */
+            if (formID == NewCommanderForm) {
+                ui_printf(0,  8, PAL_NORMAL,  "Difficulty:");
+                ui_printf(0, 10, PAL_NORMAL,  "Pts left :");
+                ui_printf(0, 12, PAL_NORMAL,  "Pilot    :");
+                ui_printf(0, 15, PAL_NORMAL,  "Fighter  :");
+                ui_printf(0, 17, PAL_NORMAL,  "Trader   :");
+                ui_printf(0, 19, PAL_NORMAL,  "Engineer :");
+            }
             return;
         }
     }
@@ -635,8 +644,8 @@ __attribute__((used)) void GEN_FrmSetEventHandler(FormPtr frm, void* handler)
 __attribute__((used)) Boolean GEN_FrmDispatchEvent(EventType* ep)
 {
     int i;
-    kprintf("FrmDispatchEvent: eType=%d curForm=%d handlers=%d",
-            (int)ep->eType, (int)ui_current_form, _form_handler_count);
+    if (ep->eType != nilEvent)
+        kprintf("FrmDispatch: eType=%d form=%d", (int)ep->eType, (int)ui_current_form);
     for (i = 0; i < _form_handler_count; i++) {
         if (_form_handlers[i].formID == ui_current_form) {
             if (_form_handlers[i].handler) {
