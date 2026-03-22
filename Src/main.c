@@ -256,6 +256,26 @@ u16 main(void)
         kprintf("main: calling StartNewGame, name=%s", NameCommander);
         StartNewGame();
         kprintf("main: StartNewGame done, CurForm=%d", CurForm);
+
+        /* Auto-confirm NewCommanderForm: skip the Palm UI entirely.
+         * Name was collected in commander_name_screen(); skills start 1/1/1/1. */
+        if (CurForm == NewCommanderForm)
+        {
+            EventType ev;
+            /* Deliver frmOpenEvent so handler initialises NameH */
+            memset(&ev, 0, sizeof(ev));
+            ev.eType = frmOpenEvent;
+            ev.data.frmOpen.formID = NewCommanderForm;
+            AppHandleEvent(&ev);          /* handler registered via frmLoadEvent */
+            kprintf("main: delivered frmOpen to NewCmdForm");
+
+            /* Deliver OK button to advance to SystemInformationForm */
+            memset(&ev, 0, sizeof(ev));
+            ev.eType = ctlSelectEvent;
+            ev.data.ctlSelect.controlID = NewCommanderOKButton;
+            AppHandleEvent(&ev);
+            kprintf("main: delivered OK, CurForm now=%d", (int)CurForm);
+        }
     }
 
     kprintf("main: entering GenAppLoop, CurForm=%d", CurForm);
