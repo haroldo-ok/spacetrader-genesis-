@@ -85,7 +85,7 @@ static void BuyShip( int Index )
 // *************************************************************************
 // Determine Ship Prices depending on tech level of current system.
 // *************************************************************************
-static void DetermineShipPrices( void )
+void DetermineShipPrices( void )
 {
 	int i;
 

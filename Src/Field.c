@@ -42,7 +42,7 @@ void SetTriggerList( FormPtr frm, int Nr, int Index )
 void SetControlLabel( FormPtr frm, int Nr, char* Label )
 {
     (void)frm; (void)Nr;
-    GEN_CtlSetLabel((void*)(intptr_t)Nr, Label);
+    GEN_CtlSetLabel((void*)((long)Nr), Label);
 }
 
 int GetTriggerList( FormPtr frm, int Nr )

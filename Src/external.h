@@ -94,6 +94,7 @@ extern HIGHSCORE Hscores[];
 extern int Shortcut1, Shortcut2, Shortcut3, Shortcut4;
 
 extern char SBuf[];
+extern char FindSystem[];   /* galaxy chart search string */
 extern char SBuf2[];
 
 extern uint32_t romVersion;
@@ -261,6 +262,13 @@ extern const char* SystemSize[];
 extern SHIP SpaceMonster;
 extern SHIP Scarab;
 extern SHIP Dragonfly;
+
+/* UI shared state */
+extern char ui_field_buf[64];   /* defined in ui.c */
+
+/* SRAM full save/load – defined in ui.c, SAVEGAMETYPE needed */
+extern void    sram_save_full(SAVEGAMETYPE* sg);
+extern void    sram_load_full(SAVEGAMETYPE* sg);
 
 #endif /* EXTERNAL_H */
 

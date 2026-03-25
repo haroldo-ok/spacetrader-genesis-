@@ -34,7 +34,9 @@
 
 /* Genesis port: bitmap internals access not needed (BELOW40 is always false) */
 #include "external.h"
+#include "compat.h"
 #include "ui.h"
+#include "ui_screens.h"
 
 #define ourMinVersion	sysMakeROMVersion(2,0,0,sysROMStageRelease,0)
 void UnpackBooleans(Byte _val, Boolean *_a, Boolean *_b, Boolean *_c, Boolean *_d,
@@ -506,6 +508,15 @@ static void AppStop(void)
 // ************************************************************************* 
 static void AppEventLoop(void)
 {
+    /* AppEventLoop is now a thin wrapper around ui_game_loop.
+     * The new architecture uses direct screen functions instead
+     * of the Palm OS form/event dispatch system. */
+    ui_game_loop();
+    /* Legacy event loop removed - see ui_screens.c */
+}
+
+void AppEventLoop_legacy(void)
+{
     /* Genesis port: main game loop.
      * We poll joypad via ui_vsync() (called inside GEN_EvtGetEvent),
      * synthesize Palm-style events, then dispatch through the original
@@ -534,6 +545,10 @@ static void AppEventLoop(void)
             GEN_EvtGetEvent(&event, -1);
         }
 
+        /* Skip nil events entirely - no handler cares about them */
+        if (event.eType == nilEvent) continue;
+        kprintf("AppEventLoop: dispatching eType=%d CurForm=%d",
+                (int)event.eType, (int)CurForm);
         if (!AppHandleEvent(&event))
             FrmDispatchEvent(&event);
 

@@ -262,6 +262,7 @@ extern Boolean DiscardCargoFormHandleEvent( EventPtr _eventP );
 // void ClearHighScores( void );                  // Traveler.c
 // long WormholeTax( int a, int b )               // Traveler.c
 // int MercenaryMoney();						  // Traveler.c
+long StandardPrice(char Good, char Size, char Tech, char Govt, int Res); // Traveler.c
 // extern long StandardPrice( char _Good, char _Size, char _Tech, char _Government, int _Resources );  // Traveler.c
 // int NextSystemWithinRange(int Current, Boolean Back); // Traveler.c
 

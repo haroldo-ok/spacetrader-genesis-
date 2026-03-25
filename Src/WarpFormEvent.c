@@ -34,6 +34,8 @@
 
 #include "external.h"
 
+char FindSystem[NAMELEN+1];  /* global so ui.c GEN_FrmDoDialog can write it */
+
 // *************************************************************************
 // To draw a circle with centre Xs, Ys and radius R.
 // *************************************************************************
@@ -444,7 +446,6 @@ Boolean GalacticChartFormHandleEvent(EventPtr eventP)
 	void* SystemH;
 	void* SystemH2;
 	FormPtr frm;
-	char FindSystem[NAMELEN+1];
 	Boolean DontLoad;
 
 	switch (eventP->eType) 

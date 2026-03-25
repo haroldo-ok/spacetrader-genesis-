@@ -87,7 +87,7 @@ static char AvailableQuarters( void )
 // *************************************************************************
 // Determine which mercenary is for hire in the current system
 // *************************************************************************
-static int GetForHire( void )
+int GetForHire( void )
 {
 	int ForHire = -1;
 	int i;

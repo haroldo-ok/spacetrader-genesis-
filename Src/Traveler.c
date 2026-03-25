@@ -1,5 +1,7 @@
 /* Genesis port: SRAM needed for high scores */
 #include "genesis.h"
+#include "ui_screens.h"
+#include "compat.h"
 /***********************************************************************
  *
  * SPACE TRADER 1.2.0
@@ -106,7 +108,7 @@ long InsuranceMoney( void )
 // *************************************************************************
 // Standard price calculation
 // *************************************************************************
-static long StandardPrice( char Good, char Size, char Tech, char Government, int Resources )
+long StandardPrice( char Good, char Size, char Tech, char Government, int Resources )
 {
     long Price;
 
@@ -401,7 +403,7 @@ static void InitializeTradeitems( const int Index )
 // *************************************************************************
 // Determine prices in specified system (changed from Current System) SjG
 // *************************************************************************
-static void DeterminePrices( Byte SystemID )
+void DeterminePrices( Byte SystemID )
 {
 	int i;
 	
@@ -704,7 +706,7 @@ static void ShuffleStatus( void )
 // *************************************************************************
 // Determine next system withing range
 // *************************************************************************
-static int NextSystemWithinRange( int Current, Boolean Back )
+int NextSystemWithinRange( int Current, Boolean Back )
 {
 	int i = Current;
 
@@ -1299,6 +1301,8 @@ void ClearHighScores( void )
 Boolean StartNewGame( void )
 {
 	int i, j, k, d, x, y;
+	kprintf("StartNewGame: entry, NameCommander='%s' Difficulty=%d",
+	     NameCommander, (int)Difficulty);
 	Boolean Redo, CloseFound, FreeWormhole;
 
 	if (NameCommander[0] == '\0')
@@ -1313,6 +1317,8 @@ Boolean StartNewGame( void )
 	i = 0;
 	while (i < MAXSOLARSYSTEM)
 	{
+		/* Feed SGDK watchdog - galaxy generation can take many iterations */
+		SYS_doVBlankProcess();
 		if (i < MAXWORMHOLE)
 		{
 			// Place the first system somewhere in the centre
@@ -1384,6 +1390,7 @@ Boolean StartNewGame( void )
 	// names in the alphabet are all in the centre
 	for (i=0; i<MAXSOLARSYSTEM; ++i)
 	{
+		SYS_doVBlankProcess();
 		d = 0;
 		while (d < MAXWORMHOLE)
 		{
@@ -1423,6 +1430,7 @@ Boolean StartNewGame( void )
 	i = 1;
 	while (i <= MAXCREWMEMBER)
 	{
+		SYS_doVBlankProcess(); /* keep watchdog alive */
 		Mercenary[i].CurSystem = GetRandom( MAXSOLARSYSTEM );
 		
 		Redo = false;
@@ -2542,11 +2550,13 @@ Boolean NewCommanderFormHandleEvent(EventPtr eventP)
    int  CommanderNameLen;
    Boolean handled = false;
    FormPtr frmP = FrmGetActiveForm();
-
+	kprintf("NewCmdForm: eType=%d", (int)eventP->eType);
 	switch (eventP->eType) 
 	{
 		case ctlSelectEvent:
 			// Closing the New Commander screen
+			kprintf("NewCmdForm: ctlSelect controlID=%d OKButton=%d",
+			     (int)eventP->data.ctlSelect.controlID, (int)NewCommanderOKButton);
 			if (eventP->data.ctlSelect.controlID == NewCommanderOKButton)
 			{
 				if (2*MAXSKILL - COMMANDER.Pilot - COMMANDER.Fighter -
@@ -2558,7 +2568,9 @@ Boolean NewCommanderFormHandleEvent(EventPtr eventP)
 				}
 
 				GetField( frmP, NewCommanderEditNameField, NameCommander, NameH );
-
+				kprintf("NewCmdForm: OK pressed, name='%s' Pilot=%d Fight=%d Trade=%d Eng=%d",
+				     NameCommander, (int)COMMANDER.Pilot, (int)COMMANDER.Fighter,
+				     (int)COMMANDER.Trader, (int)COMMANDER.Engineer);
 				DeterminePrices(COMMANDER.CurSystem);
 
 				if (Difficulty < NORMAL)
@@ -2636,6 +2648,7 @@ Boolean NewCommanderFormHandleEvent(EventPtr eventP)
 			break;
 
 		case frmOpenEvent:
+			kprintf("NewCmdForm: frmOpenEvent - init NameH and draw skills");
 			// Set Commander name and skills	
 			CommanderNameLen = NAMELEN+1;
 			NameH = SetField( frmP, NewCommanderEditNameField, NameCommander, CommanderNameLen, true );
