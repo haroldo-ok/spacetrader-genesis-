@@ -79,6 +79,7 @@ static inline void SYS_doVBlankProcess(void) {}
 #define BUTTON_B     0x0010
 #define BUTTON_C     0x0020
 #define BUTTON_START 0x0080
+static inline void JOY_init(void) {}
 static inline u16 JOY_readJoypad(u8 j) { (void)j; return 0; }
 
 /* ── SRAM ────────────────────────────────────────────────────────── */

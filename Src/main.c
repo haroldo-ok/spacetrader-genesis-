@@ -17,7 +17,7 @@ extern void GenAppStop(void);
 /* -----------------------------------------------------------------------
  * Splash / title screen
  * --------------------------------------------------------------------- */
-static void show_splash(void)
+static u16 show_splash(void)
 {
     ui_clear_screen();
     ui_printf(4,  4, PAL_TITLE,  " ___  ___  _   ___ ___  ");
@@ -25,12 +25,13 @@ static void show_splash(void)
     ui_printf(4,  6, PAL_TITLE,  "|__ ||  _/ _ | (__| _|  ");
     ui_printf(4,  7, PAL_TITLE,  "|___/|_|/_/ |_|___|___| ");
     ui_printf(3,  9, PAL_HILIGHT,"  T R A D E R  1 . 2 . 0 ");
-    ui_printf(0, 11, PAL_NORMAL, "  Sega Genesis Port          ");
-    ui_printf(0, 12, PAL_DIM,    "  Pieter Spronck / SGDK 1.70 ");
-    ui_printf(0, 24, PAL_STATUS, " A=New Game    B=Load Save   ");
+    ui_printf(0, 11, PAL_NORMAL, "  Sega Genesis Port");
+    ui_printf(0, 12, PAL_DIM,    "  Pieter Spronck / SGDK 1.70");
+    ui_printf(0, UI_STATUS_ROW,  PAL_STATUS, "  A=New Game       B=Continue  ");
     for (;;) {
         ui_vsync();
-        if (ui_joy_pressed & (BTN_A|BTN_B|BTN_START)) return;
+        if (ui_joy_pressed & (BTN_A|BTN_B|BTN_START))
+            return ui_joy_pressed;
     }
 }
 
@@ -48,25 +49,34 @@ u16 main(u16 hardReset)
     SRAM_enable();
     SRAM_disable();
 
-    show_splash();
-    kprintf("main: splash done");
+    u16 splash_btn = show_splash();
+    kprintf("main: splash done, btn=0x%04x", (int)splash_btn);
 
     Boolean has_save = sram_has_save();
-    Boolean new_game = !has_save;
     kprintf("main: has_save=%d", (int)has_save);
 
-    if (has_save) {
-        ui_clear_screen();
-        ui_title("SPACE TRADER");
-        ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL,  "A saved game was found.");
-        ui_printf(0, UI_BODY_TOP + 3, PAL_HILIGHT,  "A = Continue");
-        ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL,   "B = New Game");
-        ui_status("A=Continue  B=New Game");
-        for (;;) {
-            ui_vsync();
-            if (ui_joy_pressed & BTN_A) { new_game = false; break; }
-            if (ui_joy_pressed & BTN_B) { new_game = true;  break; }
+    /* Decide new vs continue based on button pressed and save availability */
+    Boolean new_game;
+    if (splash_btn & BTN_B) {
+        /* Player wants to continue */
+        if (has_save) {
+            new_game = false;
+        } else {
+            /* No save found — inform and start new game */
+            ui_clear_screen();
+            ui_title("NO SAVE FOUND");
+            ui_printf(0, UI_BODY_TOP + 2, PAL_WARN,   "No saved game found.");
+            ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL, "Starting a new game...");
+            ui_status("Press any button");
+            for (;;) {
+                ui_vsync();
+                if (ui_joy_pressed) break;
+            }
+            new_game = true;
         }
+    } else {
+        /* A or Start: new game (ignore existing save) */
+        new_game = true;
     }
 
     if (new_game) {

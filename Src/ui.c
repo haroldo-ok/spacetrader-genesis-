@@ -84,9 +84,11 @@ static const u8 _pal_hw[6] = { 0,1,2,3,1,3 };
  * ====================================================================== */
 void ui_init(void)
 {
+    JOY_init();                          /* must be called before JOY_readJoypad */
     PAL_setColors(0, _pal_data, 64, CPU);
     VDP_clearPlane(BG_A, TRUE);
     VDP_clearPlane(BG_B, TRUE);
+    VDP_clearPlane(WINDOW, TRUE);        /* SGDK VDP_drawText uses WINDOW plane */
     ui_frame_count = ui_current_form = ui_joy_pressed = ui_joy_held = 0;
     ui_field_buf[0] = '\0';
     kprintf("ui_init done");

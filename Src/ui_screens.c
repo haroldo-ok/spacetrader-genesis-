@@ -212,7 +212,7 @@ static u16 wait_button(void)
  * --------------------------------------------------------------------- */
 /* Forward declarations of game functions we call */
 extern void DockDetermineActions(void);    /* sets dockable flags */
-extern int  DockedFormDoCommand(int cmd);  /* execute a docked action */
+extern Boolean DockedFormDoCommand(int cmd);  /* execute a docked action */
 /* MenuCommand* values come from MerchantRsc.h via external.h - do NOT redeclare */
 
 
@@ -378,7 +378,7 @@ static void screen_system_info(void)
             int msel = 0;
 
             /* Draw menu overlay */
-            #define _DRAW_MENU() do {                 int _mi;                 ui_clear_body();                 ui_title("DOCKED MENU");                 for (_mi = 0; _mi < _NMENU; _mi++) {                     ui_printf(0, UI_BODY_TOP + _mi, _mi == msel ? PAL_HILIGHT : PAL_NORMAL,                         " %s%s", _mi == msel ? "> " : "  ", _menu[_mi].label);                 }                 ui_status("UP/DN=item  A=select  B=cancel");             } while(0)
+            #define _DRAW_MENU() do {                 int _mi;                 ui_clear_body();                 ui_title("DOCKED MENU");                 for (_mi = 0; _mi < _NMENU; _mi++) {                     ui_printf(0, UI_BODY_TOP + _mi,                         _mi == msel ? PAL_HILIGHT : PAL_NORMAL,                         " %s%s", _mi == msel ? "> " : "  ",                         _menu[_mi].label);                 }                 ui_status("UP/DN=item  A=select  B=cancel");             } while(0)
 
             _DRAW_MENU();
             Boolean menu_done = false;
@@ -1085,7 +1085,7 @@ static void draw_plunder(void)
     }
     ui_printf(0, UI_BODY_TOP + MAXTRADEITEM + 1, PAL_DIM,
         "Bays free: %d", TotalCargoBays() - FilledCargoBays());
-    ui_status("UP/DN=item  A=take qty  C=take all  B=dump  St=done");
+    ui_status("UP/DN A=qty C=all B=dump St=done");
 }
 
 static void screen_plunder(void)
@@ -1988,9 +1988,9 @@ static void screen_new_commander(void)
             field==F_ENG ? PAL_HILIGHT : PAL_NORMAL, \
             "Engineer  : %d   %s", (int)COMMANDER.Engineer, field==F_ENG?"<":""); \
         if (rem == 0) \
-            ui_status("A=Start game  B=Cycle name  UP/DN=field  LR=change"); \
+            ui_status("A=Start B=Name UP/DN=field LR=pts"); \
         else \
-            ui_status("Spend all skill pts  UP/DN=field  LR=change  B=name"); \
+            ui_status("UP/DN=field LR=pts  B=name  A=start"); \
     } while(0)
 
     _DRAW_NCMD();
