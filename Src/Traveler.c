@@ -108,7 +108,7 @@ long InsuranceMoney( void )
 // *************************************************************************
 // Standard price calculation
 // *************************************************************************
-static long StandardPrice( char Good, char Size, char Tech, char Government, int Resources )
+long StandardPrice( char Good, char Size, char Tech, char Government, int Resources )
 {
     long Price;
 
@@ -403,7 +403,7 @@ static void InitializeTradeitems( const int Index )
 // *************************************************************************
 // Determine prices in specified system (changed from Current System) SjG
 // *************************************************************************
-static void DeterminePrices( Byte SystemID )
+void DeterminePrices( Byte SystemID )
 {
 	int i;
 	
@@ -706,7 +706,7 @@ static void ShuffleStatus( void )
 // *************************************************************************
 // Determine next system withing range
 // *************************************************************************
-static int NextSystemWithinRange( int Current, Boolean Back )
+int NextSystemWithinRange( int Current, Boolean Back )
 {
 	int i = Current;
 

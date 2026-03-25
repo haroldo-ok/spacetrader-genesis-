@@ -41,6 +41,7 @@ int  ui_current_form;
 char ui_field_buf[64];
 
 u32 romVersion = 0x03503000UL;   /* satisfies BELOW35 guards */
+extern char FindSystem[];          /* WarpFormEvent.c — galaxy chart search */
 
 /* =========================================================================
  * §2  Palette
@@ -800,7 +801,6 @@ __attribute__((used)) u16 GEN_FrmDoDialog(FormPtr frm)
 
     /* ── Find system by name ───────────────────────────────────────────── */
     case FindSystemForm: {
-        extern char FindSystem[];
         int sel = 0, top = 0, vis = 10, n = MAXSOLARSYSTEM, i;
 
         ui_clear_body();
@@ -1047,6 +1047,18 @@ void PalmMem_Free(void* p) { (void)p; }
 
 /* GEN_Alert — used by ErrDisplayFileLineMsg and ErrFatalDisplayIf macros */
 __attribute__((used)) void GEN_Alert(const char* msg) { ui_alert(msg); }
+
+/* GEN_FrmAlert / GEN_FrmCustomAlert — compatibility stubs.
+ * palmcompat.h macros call ui_alert_id/ui_custom_alert directly,
+ * but LTO-compiled files may still emit references to these symbols. */
+__attribute__((used)) int GEN_FrmAlert(int id)
+    { return ui_alert_id(id); }
+
+__attribute__((used)) u16 GEN_FrmCustomAlert(int id,
+    const char* s1, const char* s2, const char* s3)
+    { return (u16)ui_custom_alert(id, s1, s2, s3); }
+
+
 
 /* =========================================================================
  * §18  Dummy control instance (returned by FrmGetObjectPtr shim)

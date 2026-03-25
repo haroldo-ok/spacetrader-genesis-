@@ -15,19 +15,28 @@
 #include "external.h"
 #include "compat.h"
 
+
+/* -----------------------------------------------------------------------
+ * Forward declarations for functions defined in other translation units.
+ * Declared at file scope so LTO resolves them correctly.
+ * --------------------------------------------------------------------- */
+extern void DeterminePrices(int SystemID);           /* Traveler.c */
+extern long StandardPrice(char Good, char Size,      /* Traveler.c */
+    char Tech, char Govt, int Res);
+extern void DetermineShipPrices(void);               /* BuyShipEvent.c */
+extern int  NextSystemWithinRange(int Cur, Boolean Back); /* Traveler.c */
+extern int  GetForHire(void);                        /* SystemInfoEvent.c */
+extern long TotalShields(SHIP* Sh);                  /* Encounter.c */
+extern long TotalShieldStrength(SHIP* Sh);           /* Encounter.c */
+extern void Travel(void);                            /* Traveler.c */
+extern void PlunderCargo(int Index, int Amount);     /* Cargo.c */
+extern char FindSystem[];                            /* WarpFormEvent.c */
+
 /* -----------------------------------------------------------------------
  * Internal state
  * --------------------------------------------------------------------- */
 static ScreenID _cur_screen = SCREEN_NONE;
 static ScreenID _next_screen = SCREEN_NONE;
-
-/* -----------------------------------------------------------------------
- * Watchdog / VBlank feed
- * --------------------------------------------------------------------- */
-void ui_watchdog(void)
-{
-    SYS_doVBlankProcess();
-}
 
 /* -----------------------------------------------------------------------
  * Navigation
@@ -44,116 +53,38 @@ ScreenID ui_current_screen(void)
 }
 
 /* -----------------------------------------------------------------------
- * Alert ID message table
- * Maps Palm OS alert resource IDs to human-readable strings.
+ * Local quantity spinner (ui_screens-private)
+ * Replaces old ui_ask_quantity; does NOT conflict with ui.c symbols.
  * --------------------------------------------------------------------- */
-static const struct { int id; const char* msg; } _alert_msgs[] = {
-    /* Travel / warp alerts */
-    { 1000, "Not enough fuel for this trip." },
-    { 1001, "That system is out of range." },
-    { 1002, "You need to pay off your debt first." },
-    { 1003, "You must pay your mercenaries first." },
-    { 1004, "You cannot afford the insurance premium." },
-    { 1005, "You cannot afford the wormhole toll." },
-    { 1006, "Wild refuses to go to a system with police." },
-    { 1007, "Wild has left your ship." },
-    /* Finance */
-    { 1010, "You cannot afford that." },
-    { 1011, "Your debt is getting dangerously large!" },
-    { 1012, "The bank has extended you a loan." },
-    /* Ship / combat */
-    { 1020, "Your cargo bays are full." },
-    { 1021, "Your ship has been destroyed!" },
-    { 1022, "You have been arrested!" },
-    { 1023, "You have escaped!" },
-    { 1024, "The reactor is consuming resources." },
-    { 1025, "The reactor is making unusual noises." },
-    { 1026, "The reactor is smoking!" },
-    { 1027, "The reactor has melted down! Ship destroyed." },
-    /* Skills */
-    { 1030, "You still have skill points to spend." },
-    /* Special events */
-    { 1040, "The experiment has been performed." },
-    { 1041, "Your ship flew through a fabric rip." },
-    { 1042, "All tribbles have been irradiated." },
-    /* High scores */
-    { 1050, "Clear the high score table?" },
-    /* Arrival */
-    { 1060, "You have arrived safely." },
-    { 1061, "An uneventful trip." },
-    /* Default */
-    {    0, "OK" }
-};
-
-const char* ui_alert_message(int alertID)
-{
-    int i;
-    for (i = 0; _alert_msgs[i].id != 0; i++)
-        if (_alert_msgs[i].id == alertID)
-            return _alert_msgs[i].msg;
-    return "OK";
-}
-
-/* -----------------------------------------------------------------------
- * Simple blocking dialogs
- * --------------------------------------------------------------------- */
-void ui_alert(const char* msg)
-{
-    ui_msgbox("Notice", msg, 0);
-}
-
-int ui_alert_id(int alertID)
-{
-    return ui_msgbox("Notice", ui_alert_message(alertID), 0) ? 0 : 1;
-}
-
-int ui_ask_yesno(const char* question)
-{
-    return ui_msgbox("Question", question, 1);
-}
-
-int ui_ask_quantity(const char* title, const char* item, int max, int price)
+static int _ask_qty(const char* title, const char* item, int max, int price)
 {
     int qty = 0;
     char pricebuf[48];
-
     if (max <= 0) return 0;
-
     if (price > 0)
         snprintf(pricebuf, sizeof(pricebuf), "%s  @%d cr each", item, price);
     else
         snprintf(pricebuf, sizeof(pricebuf), "%s", item);
-
     ui_clear_body();
     ui_title(title);
-    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, pricebuf);
+    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "%s", pricebuf);
     ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL, "Max: %d", max);
-    ui_printf(0, UI_BODY_TOP + 5, PAL_HILIGHT, "Qty: %d  ", qty);
-    ui_status("LR=change qty  A=confirm  B=cancel");
-
+    ui_printf(0, UI_BODY_TOP + 5, PAL_HILIGHT, "Qty: %-6d", qty);
+    ui_status("LR=change  Up=max  Dn=0  A=OK  B=cancel");
     for (;;) {
+        int ch = 0;
         ui_vsync();
-
-        if (ui_joy_pressed & BTN_RIGHT) {
-            if (qty < max) { qty++; }
-            ui_printf(0, UI_BODY_TOP + 5, PAL_HILIGHT, "Qty: %d  ", qty);
-        }
-        if (ui_joy_pressed & BTN_LEFT) {
-            if (qty > 0) { qty--; }
-            ui_printf(0, UI_BODY_TOP + 5, PAL_HILIGHT, "Qty: %d  ", qty);
-        }
-        if (ui_joy_pressed & BTN_UP) {
-            qty = max;
-            ui_printf(0, UI_BODY_TOP + 5, PAL_HILIGHT, "Qty: %d  ", qty);
-        }
-        if (ui_joy_pressed & BTN_DOWN) {
-            qty = 0;
-            ui_printf(0, UI_BODY_TOP + 5, PAL_HILIGHT, "Qty: %d  ", qty);
-        }
-        if (ui_joy_pressed & BTN_A)  return qty;
-        if (ui_joy_pressed & BTN_B)  return 0;
+        if (ui_joy_pressed & BTN_RIGHT) { if (qty < max) { qty++; ch=1; } }
+        if (ui_joy_pressed & BTN_LEFT)  { if (qty > 0)   { qty--; ch=1; } }
+        if (ui_joy_pressed & BTN_UP)    { qty = max; ch=1; }
+        if (ui_joy_pressed & BTN_DOWN)  { qty = 0;   ch=1; }
+        if (ch) ui_printf(0, UI_BODY_TOP + 5, PAL_HILIGHT, "Qty: %-6d", qty);
+        if (ui_joy_pressed & BTN_A) return qty;
+        if (ui_joy_pressed & BTN_B) return 0;
     }
 }
+
+
 
 /* -----------------------------------------------------------------------
  * Forward declarations for screen functions
@@ -570,7 +501,6 @@ static void screen_warp(void)
  * --------------------------------------------------------------------- */
 static void screen_execute_warp(void)
 {
-    extern void Travel(void);
         ui_clear_body();
     ui_title("EXECUTE WARP");
 
@@ -699,7 +629,6 @@ static void draw_cargo_list(int sel, int buying)
 static void screen_buy_cargo(void)
 {
     /* Ensure prices are current */
-    extern void DeterminePrices(int Index);
     DeterminePrices(COMMANDER.CurSystem);
 
     int sel = 0;
@@ -719,7 +648,7 @@ static void screen_buy_cargo(void)
                 if (max_can_buy <= 0) {
                     ui_alert("You cannot afford any or no space.");
                 } else {
-                    int qty = ui_ask_quantity("BUY CARGO", Tradeitem[sel].Name,
+                    int qty = _ask_qty("BUY CARGO", Tradeitem[sel].Name,
                                               max_can_buy, BuyPrice[sel]);
                     if (qty > 0) {
                         BuyCargo(sel, qty, true);
@@ -743,7 +672,6 @@ static void screen_buy_cargo(void)
  * --------------------------------------------------------------------- */
 static void screen_sell_cargo(void)
 {
-    extern void DeterminePrices(int Index);
     DeterminePrices(COMMANDER.CurSystem);
 
     int sel = 0;
@@ -758,13 +686,13 @@ static void screen_sell_cargo(void)
                 ui_alert("You don't have any of this.");
             } else if (SellPrice[sel] <= 0) {
                 /* Dump it */
-                int qty = ui_ask_quantity("DUMP CARGO", Tradeitem[sel].Name,
+                int qty = _ask_qty("DUMP CARGO", Tradeitem[sel].Name,
                                           Ship.Cargo[sel], 0);
                 if (qty > 0)
                     SellCargo(sel, qty, DUMPCARGO);
                 draw_cargo_list(sel, 0);
             } else {
-                int qty = ui_ask_quantity("SELL CARGO", Tradeitem[sel].Name,
+                int qty = _ask_qty("SELL CARGO", Tradeitem[sel].Name,
                                           Ship.Cargo[sel], SellPrice[sel]);
                 if (qty > 0)
                     SellCargo(sel, qty, SELLCARGO);
@@ -801,7 +729,7 @@ static void screen_discard_cargo(void)
             if (Ship.Cargo[sel] <= 0) {
                 ui_alert("Nothing to dump.");
             } else {
-                int qty = ui_ask_quantity("DUMP", Tradeitem[sel].Name,
+                int qty = _ask_qty("DUMP", Tradeitem[sel].Name,
                                           Ship.Cargo[sel], 0);
                 if (qty > 0)
                     SellCargo(sel, qty, DUMPCARGO);
@@ -853,7 +781,7 @@ static void screen_bank(void)
                 long avail = _MAXLOAN() - Debt;
                 char title[32];
                 snprintf(title, sizeof(title), "Loan (max %ld cr)", avail);
-                int amt = ui_ask_quantity(title, "credits", (int)avail, 0);
+                int amt = _ask_qty(title, "credits", (int)avail, 0);
                 if (amt > 0) {
                     Debt += amt;
                     Credits += amt;
@@ -870,7 +798,7 @@ static void screen_bank(void)
                 if (can_pay <= 0) {
                     ui_alert("You have no credits to repay with.");
                 } else {
-                    int amt = ui_ask_quantity("REPAY", "credits", (int)can_pay, 0);
+                    int amt = _ask_qty("REPAY", "credits", (int)can_pay, 0);
                     if (amt > 0) {
                         long pay = min((long)amt, min(Debt, Credits));
                         Credits -= pay;
@@ -889,7 +817,7 @@ static void screen_bank(void)
                     Insurance = true;
                 }
             } else {
-                if (ui_ask_yesno("Cancel insurance?")) {
+                if (ui_confirm("Cancel insurance?")) {
                     Insurance = false;
                     NoClaim = 0;
                 }
@@ -944,7 +872,7 @@ static void screen_shipyard(void)
             } else if (Credits < cost) {
                 ui_alert("Not enough credits for full repair.");
             } else {
-                if (ui_ask_yesno("Repair hull to full strength?")) {
+                if (ui_confirm("Repair hull to full strength?")) {
                     Credits -= cost;
                     Ship.Hull = Shiptype[Ship.Type].HullStrength;
                 }
@@ -960,7 +888,7 @@ static void screen_shipyard(void)
             } else if (Credits < cost) {
                 ui_alert("Not enough credits for full fuel.");
             } else {
-                if (ui_ask_yesno("Fill up fuel tanks?")) {
+                if (ui_confirm("Fill up fuel tanks?")) {
                     Credits -= cost;
                     Ship.Fuel = Shiptype[Ship.Type].FuelTanks;
                 }
@@ -1138,16 +1066,14 @@ static void screen_plunder(void)
             } else {
                 int free = TotalCargoBays() - FilledCargoBays();
                 int max  = min(Opponent.Cargo[sel], free);
-                int qty  = ui_ask_quantity("PLUNDER", Tradeitem[sel].Name, max, 0);
+                int qty  = _ask_qty("PLUNDER", Tradeitem[sel].Name, max, 0);
                 if (qty > 0) {
-                    extern void PlunderCargo(int Index, int Amount);
                     PlunderCargo(sel, qty);
                 }
                 draw_plunder();
             }
         }
         if (joy & BTN_C) {
-            extern void PlunderCargo(int Index, int Amount);
             PlunderCargo(sel, 999);
             draw_plunder();
         }
@@ -1157,7 +1083,6 @@ static void screen_plunder(void)
         }
         if (joy & BTN_START) {
             /* Done plundering - go back to system info via Travel() continuation */
-            extern void Travel(void);
             if (EncounterType == MARIECELESTEENCOUNTER && Ship.Cargo[NARCOTICS] > 0)
                 JustLootedMarie = true;
             Travel();
@@ -1351,7 +1276,6 @@ static void screen_quests(void)
  * --------------------------------------------------------------------- */
 static void _draw_avg_prices(void)
 {
-    extern long StandardPrice(char Good, char Size, char Tech, char Govt, int Res);
     int i;
     SOLARSYSTEM* ws = &SolarSystem[WarpSystem];
 
@@ -1394,7 +1318,6 @@ static void _draw_avg_prices(void)
 
 static void screen_average_prices(void)
 {
-    extern int NextSystemWithinRange(int Current, Boolean Back);
     /* Deliver open so AveragePricesFormHandleEvent can init APLscreen */
     deliver_open(AveragePricesFormHandleEvent, AveragePricesForm);
     _draw_avg_prices();
@@ -1605,8 +1528,7 @@ static void _draw_personnel(int hilight_slot)
 
     /* Mercenary available for hire */
     {
-        extern int GetForHire(void);
-        int hire = GetForHire();
+            int hire = GetForHire();
         int row = UI_BODY_TOP + 9;
         if (hire >= 0) {
             int daily = (Mercenary[hire].Pilot + Mercenary[hire].Fighter +
@@ -1657,7 +1579,6 @@ static void screen_personnel(void)
 static void _draw_buy_ship(int sel)
 {
     int i;
-    extern void DetermineShipPrices(void);
     DetermineShipPrices();
     ui_clear_body();
     ui_title("BUY SHIP");
@@ -2107,8 +2028,7 @@ static void screen_new_commander(void)
                 continue;
             }
             /* Replicate NewCommanderFormHandleEvent OK logic */
-            extern void DeterminePrices(int SystemID);
-            DeterminePrices(COMMANDER.CurSystem);
+                    DeterminePrices(COMMANDER.CurSystem);
             if (Difficulty < NORMAL)
                 if (CURSYSTEM.Special < 0)
                     CURSYSTEM.Special = LOTTERYWINNER;
@@ -2168,17 +2088,3 @@ void palm_form_to_screen(int formID)
     ui_goto_screen(sid);
 }
 
-/* -----------------------------------------------------------------------
- * ui_custom_alert - FrmCustomAlert replacement with string substitution
- * --------------------------------------------------------------------- */
-int ui_custom_alert(int alertID, const char* s1, const char* s2, const char* s3)
-{
-    char msg[128];
-    const char* tmpl = ui_alert_message(alertID);
-    /* Simple: just show the template + first substitution string */
-    if (s1 && s1[0])
-        snprintf(msg, sizeof(msg), "%s\n%s", tmpl, s1);
-    else
-        snprintf(msg, sizeof(msg), "%s", tmpl);
-    return ui_msgbox("Notice", msg, 0) ? 0 : 1;
-}

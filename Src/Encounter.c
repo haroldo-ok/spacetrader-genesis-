@@ -403,7 +403,7 @@ static void Scoop( void )
 // *************************************************************************
 // Calculate total possible shield strength
 // *************************************************************************
-static long TotalShields( SHIP* Sh )
+long TotalShields( SHIP* Sh )
 {
 	int i;
 	long j;
@@ -423,7 +423,7 @@ static long TotalShields( SHIP* Sh )
 // *************************************************************************
 // Calculate total shield strength
 // *************************************************************************
-static long TotalShieldStrength( SHIP* Sh )
+long TotalShieldStrength( SHIP* Sh )
 {
 	int i;
 	long k;

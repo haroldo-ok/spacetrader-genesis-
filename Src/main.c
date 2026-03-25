@@ -37,7 +37,7 @@ static void show_splash(void)
 /* -----------------------------------------------------------------------
  * Main entry point
  * --------------------------------------------------------------------- */
-u16 main(void)
+int main(void)
 {
     VDP_setScreenWidth320();
     kprintf("main: start");

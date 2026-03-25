@@ -94,6 +94,7 @@ extern HIGHSCORE Hscores[];
 extern int Shortcut1, Shortcut2, Shortcut3, Shortcut4;
 
 extern char SBuf[];
+extern char FindSystem[];   /* galaxy chart search string */
 extern char SBuf2[];
 
 extern uint32_t romVersion;
