@@ -37,7 +37,19 @@ extern u16  snprintf(char* buf, size_t n, const char* fmt, ...) __attribute__((f
 extern u16  vsprintf(char* buf, const char* fmt, __builtin_va_list ap);
 extern int  strcasecmp(const char* a, const char* b);
 extern int  atoi(const char* s);
-/* The rest GCC knows as builtins: strlen, strcpy, strcmp, memcpy, etc. */
+/* String/memory functions — declared explicitly (real SGDK string.h uses SGDK types,
+ * but on m68k all of u16/int/size_t are 32-bit so these match in practice) */
+extern u16         strlen(const char* str);
+extern char*       strcpy(char* dst, const char* src);
+extern char*       strncpy(char* dst, const char* src, u16 len);
+extern char*       strcat(char* dst, const char* src);
+extern char*       strncat(char* dst, const char* src, u16 len);
+extern s16         strcmp(const char* s1, const char* s2);
+extern s16         strncmp(const char* s1, const char* s2, u16 len);
+extern char*       strchr(const char* s, int c);
+extern void*       memset(void* dst, int val, u16 len);
+extern void*       memcpy(void* dst, const void* src, u16 len);
+extern void*       memmove(void* dst, const void* src, u32 len);
 
 /* ── VDP (SGDK 1.70 API) ────────────────────────────────────────── */
 typedef enum { BG_A = 0, BG_B = 1, WINDOW = 2 } VDPPlane;

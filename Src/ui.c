@@ -25,18 +25,18 @@
 #include "genesis.h"
 #include "ui.h"
 #include "external.h"
+#ifndef SGDK_GCC
+extern void* memset(void* s, int c, unsigned int n);
+extern void* memcpy(void* d, const void* s, unsigned int n);
+extern char* strncpy(char* d, const char* s, unsigned int n);
+extern int   strcmp(const char* a, const char* b);
+#endif
 
 typedef __builtin_va_list va_list;
 #define va_start(v,l)  __builtin_va_start(v,l)
 #define va_end(v)      __builtin_va_end(v)
 #define va_arg(v,l)    __builtin_va_arg(v,l)
 
-/* String/memory function declarations for -fno-builtin builds */
-extern __SIZE_TYPE__ strlen(const char* s);
-extern void* memset(void* s, int c, __SIZE_TYPE__ n);
-extern void* memcpy(void* d, const void* s, __SIZE_TYPE__ n);
-extern char* strncpy(char* d, const char* s, __SIZE_TYPE__ n);
-extern char* strncat(char* d, const char* s, __SIZE_TYPE__ n);
 
 
 /* =========================================================================

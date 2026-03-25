@@ -14,6 +14,12 @@
 #include "ui_screens.h"
 #include "external.h"
 #include "compat.h"
+#ifndef SGDK_GCC
+extern void* memset(void* s, int c, unsigned int n);
+extern void* memcpy(void* d, const void* s, unsigned int n);
+extern char* strncpy(char* d, const char* s, unsigned int n);
+extern int   strcmp(const char* a, const char* b);
+#endif
 
 
 /* -----------------------------------------------------------------------
@@ -32,13 +38,6 @@ extern void Travel(void);                            /* Traveler.c */
 extern void PlunderCargo(int Index, int Amount);     /* Cargo.c */
 extern char FindSystem[];                            /* WarpFormEvent.c */
 
-/* String/memory function declarations for -fno-builtin builds */
-extern __SIZE_TYPE__ strlen(const char* s);
-extern void* memset(void* s, int c, __SIZE_TYPE__ n);
-extern void* memcpy(void* d, const void* s, __SIZE_TYPE__ n);
-extern char* strncpy(char* d, const char* s, __SIZE_TYPE__ n);
-extern int   strcmp(const char* a, const char* b);
-extern char* strncat(char* d, const char* s, __SIZE_TYPE__ n);
 
 /* -----------------------------------------------------------------------
  * Internal state

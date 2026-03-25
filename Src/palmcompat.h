@@ -9,19 +9,34 @@
 #ifndef PALMCOMPAT_H
 #define PALMCOMPAT_H
 
-/* Suppress warnings that are inherent to Palm->Genesis compatibility.
- * These categories are all pre-existing in the original Palm source. */
+/* Suppress warnings inherent to Palm->Genesis compatibility layer.
+ * Pragmas confirmed supported by SGDK's m68k-elf-gcc toolchain. */
 #pragma GCC diagnostic ignored "-Wunused-value"
-#pragma GCC diagnostic ignored "-Wdiscarded-qualifiers"
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wchar-subscripts"
-#pragma GCC diagnostic ignored "-Wdangling-else"
 #pragma GCC diagnostic ignored "-Wparentheses"
-#pragma GCC diagnostic ignored "-Wmisleading-indentation"
 #pragma GCC diagnostic ignored "-Woverflow"
-#pragma GCC diagnostic ignored "-Wint-conversion"
+#pragma GCC diagnostic ignored "-Wdiscarded-qualifiers"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
+#pragma GCC diagnostic ignored "-Wmisleading-indentation"
+#pragma GCC diagnostic ignored "-Wtype-limits"
+
+/* String/memory declarations for non-SGDK builds (-fno-builtin on x86 host).
+ * When building with SGDK, genesis.h provides these via its string.h. */
+#ifndef SGDK_GCC
+extern unsigned int strlen(const char* s);
+extern char* strcpy(char* dst, const char* src);
+extern char* strncpy(char* dst, const char* src, unsigned int n);
+extern char* strcat(char* dst, const char* src);
+extern char* strncat(char* dst, const char* src, unsigned int n);
+extern int   strcmp(const char* a, const char* b);
+extern int   strncmp(const char* a, const char* b, unsigned int n);
+extern int   atoi(const char* s);
+extern void* memset(void* s, int c, unsigned int n);
+extern void* memcpy(void* d, const void* s, unsigned int n);
+#endif /* !SGDK_GCC */
+
 
 
 /* SGDK 1.70: no stdlib headers available in the cross-compiler.
@@ -120,15 +135,6 @@ typedef int16_t   Coord;
 /* -----------------------------------------------------------------------
  * String functions – Palm names -> C stdlib
  * --------------------------------------------------------------------- */
-/* String function forward declarations for -fno-builtin builds */
-extern __SIZE_TYPE__ strlen(const char* s);
-extern char* strcpy(char* dst, const char* src);
-extern char* strncpy(char* dst, const char* src, __SIZE_TYPE__ n);
-extern char* strcat(char* dst, const char* src);
-extern char* strncat(char* dst, const char* src, __SIZE_TYPE__ n);
-extern int   strcmp(const char* a, const char* b);
-extern int   strncmp(const char* a, const char* b, __SIZE_TYPE__ n);
-extern int   atoi(const char* s);
 #define StrLen(s)           strlen(s)
 #define StrCopy(d,s)        strcpy(d,s)
 #define StrNCopy(d,s,n)     strncpy(d,s,n)
