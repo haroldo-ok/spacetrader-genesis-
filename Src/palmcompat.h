@@ -31,7 +31,6 @@ extern char* strncpy(char* dst, const char* src, unsigned int n);
 extern char* strcat(char* dst, const char* src);
 extern char* strncat(char* dst, const char* src, unsigned int n);
 extern int   strcmp(const char* a, const char* b);
-extern int   strncmp(const char* a, const char* b, unsigned int n);
 extern int   atoi(const char* s);
 extern void* memset(void* s, int c, unsigned int n);
 extern void* memcpy(void* d, const void* s, unsigned int n);

@@ -37,7 +37,9 @@ static void show_splash(void)
 /* -----------------------------------------------------------------------
  * Main entry point
  * --------------------------------------------------------------------- */
-bool main(bool hardReset)
+/* SGDK sys.c declares: bool main(bool hardReset) where bool = unsigned short (u16).
+ * Use u16 explicitly to avoid LTO type-mismatch with SGDK's bool=u8 in our compat. */
+u16 main(u16 hardReset)
 {
     (void)hardReset;
     VDP_setScreenWidth320();
@@ -100,5 +102,5 @@ bool main(bool hardReset)
 
     GenAppStop();
     for (;;) ui_vsync();
-    return true;
+    return 1;  /* SGDK sys.c expects non-zero = success */
 }

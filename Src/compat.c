@@ -9,11 +9,9 @@
 #include "genesis.h"
 #include "compat.h"
 
-
 /* -----------------------------------------------------------------------
  * memmove – safe overlapping copy (libmd only has memcpy)
  * --------------------------------------------------------------------- */
-#ifndef SGDK_GCC   /* SGDK's string.h provides memmove */
 void* memmove(void* dst, const void* src, u32 n)
 {
     u8*       d = (u8*)dst;
@@ -23,7 +21,6 @@ void* memmove(void* dst, const void* src, u32 n)
     else       { d += n; s += n; while (n--) *--d = *--s; }
     return dst;
 }
-#endif /* !SGDK_GCC */
 
 /* -----------------------------------------------------------------------
  * vsnprintf / snprintf
@@ -74,7 +71,6 @@ int sqrt(int a)
  * atoi – string to integer (fallback; libmd may provide this already)
  * Declared weak so libmd's version wins if present.
  * --------------------------------------------------------------------- */
-#ifndef SGDK_GCC   /* SGDK's string.h provides atoi */
 __attribute__((weak))
 int atoi(const char* s)
 {
@@ -85,7 +81,6 @@ int atoi(const char* s)
     while (*s >= '0' && *s <= '9') result = result * 10 + (*s++ - '0');
     return sign * result;
 }
-#endif /* !SGDK_GCC */
 
 /* -----------------------------------------------------------------------
  * strcasecmp – case-insensitive compare (weak; libmd may provide it)
@@ -153,15 +148,14 @@ void FntCharsInWidth(const char* s, s16* w, s16* len, u8* fits)
  * strncmp – in case libmd.a doesn't provide it
  * Marked weak so libmd's version wins if present.
  * --------------------------------------------------------------------- */
-#ifndef SGDK_GCC   /* SGDK's string.h provides strncmp */
 __attribute__((weak))
-int strncmp(const char* a, const char* b, u32 n)
+s16 strncmp(const char* a, const char* b, u16 n)
 {
     while (n > 0 && *a && *b) {
-        if ((u8)*a != (u8)*b) return (int)(u8)*a - (int)(u8)*b;
+        if ((u8)*a != (u8)*b) return (s16)((u8)*a - (u8)*b);
         a++; b++; n--;
     }
     if (n == 0) return 0;
-    return (int)(u8)*a - (int)(u8)*b;
+    return (s16)((u8)*a - (u8)*b);
 }
-#endif /* !SGDK_GCC */
+
