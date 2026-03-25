@@ -20,7 +20,7 @@
  * Forward declarations for functions defined in other translation units.
  * Declared at file scope so LTO resolves them correctly.
  * --------------------------------------------------------------------- */
-extern void DeterminePrices(int SystemID);           /* Traveler.c */
+extern void DeterminePrices(Byte SystemID);          /* Traveler.c */
 extern long StandardPrice(char Good, char Size,      /* Traveler.c */
     char Tech, char Govt, int Res);
 extern void DetermineShipPrices(void);               /* BuyShipEvent.c */
@@ -31,6 +31,14 @@ extern long TotalShieldStrength(SHIP* Sh);           /* Encounter.c */
 extern void Travel(void);                            /* Traveler.c */
 extern void PlunderCargo(int Index, int Amount);     /* Cargo.c */
 extern char FindSystem[];                            /* WarpFormEvent.c */
+
+/* String/memory function declarations for -fno-builtin builds */
+extern __SIZE_TYPE__ strlen(const char* s);
+extern void* memset(void* s, int c, __SIZE_TYPE__ n);
+extern void* memcpy(void* d, const void* s, __SIZE_TYPE__ n);
+extern char* strncpy(char* d, const char* s, __SIZE_TYPE__ n);
+extern int   strcmp(const char* a, const char* b);
+extern char* strncat(char* d, const char* s, __SIZE_TYPE__ n);
 
 /* -----------------------------------------------------------------------
  * Internal state
@@ -276,6 +284,16 @@ static void deliver_open(form_handler_t handler, int formID)
     handler(&ev);
 }
 
+/* Deliver a menu command as a menuEvent so DockedFormDoCommand is called */
+static void deliver_cmd(form_handler_t handler, int cmd)
+{
+    EventType ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.eType = menuEvent;
+    ev.data.menu.itemID = (u16)cmd;
+    handler(&ev);
+}
+
 /* Deliver a button press as a ctlSelectEvent */
 static void deliver_button(form_handler_t handler, int buttonID)
 {
@@ -286,42 +304,6 @@ static void deliver_button(form_handler_t handler, int buttonID)
     handler(&ev);
 }
 
-/* Main input loop for a screen backed by a form handler */
-static void run_handler_screen(form_handler_t handler, int formID,
-                                int btn_back, int btn_a,
-                                int btn_b_id, int btn_c_id,
-                                int btn_up_id, int btn_dn_id)
-{
-    deliver_open(handler, formID);
-
-    while (_next_screen == SCREEN_NONE) {
-        ui_vsync();
-        if (!ui_joy_pressed) continue;
-
-        EventType ev;
-        memset(&ev, 0, sizeof(ev));
-
-        if ((ui_joy_pressed & BTN_B) && btn_back >= 0) {
-            /* Navigate back */
-            if (btn_back == 0)
-                ui_goto_screen(SCREEN_SYSTEM_INFO);
-            else
-                deliver_button(handler, btn_back);
-        } else if ((ui_joy_pressed & BTN_A) && btn_a > 0) {
-            deliver_button(handler, btn_a);
-        } else if ((ui_joy_pressed & BTN_C) && btn_c_id > 0) {
-            deliver_button(handler, btn_c_id);
-        } else if ((ui_joy_pressed & BTN_UP) && btn_up_id > 0) {
-            deliver_button(handler, btn_up_id);
-        } else if ((ui_joy_pressed & BTN_DOWN) && btn_dn_id > 0) {
-            deliver_button(handler, btn_dn_id);
-        } else if (ui_joy_pressed & (BTN_UP|BTN_DOWN)) {
-            ev.eType = keyDownEvent;
-            ev.data.keyDown.chr = (ui_joy_pressed & BTN_UP) ? chrPageUp : chrPageDown;
-            handler(&ev);
-        }
-    }
-}
 
 /* -----------------------------------------------------------------------
  * SYSTEM INFORMATION SCREEN
@@ -376,9 +358,65 @@ static void screen_system_info(void)
             break;
         }
         if (joy & BTN_B) {
-            /* Main docked menu */
-            ui_goto_screen(SCREEN_SHIPYARD); /* TODO: show menu */
-            break;
+            /* Docked action menu — cycle through options with B, confirm with A */
+            static const struct { const char* label; int cmd; } _menu[] = {
+                { "Buy Cargo",       MenuCommandBuyCargo },
+                { "Sell Cargo",      MenuCommandSellCargo },
+                { "Shipyard",        MenuCommandShipYard },
+                { "Buy Equipment",   MenuCommandBuyEquipment },
+                { "Sell Equipment",  MenuCommandSellEquipment },
+                { "Personnel",       MenuCommandPersonnelRoster },
+                { "Bank",            MenuCommandBank },
+                { "Galactic Chart",  MenuCommandGalacticChart },
+                { "Warp Chart",      MenuCommandShortRangeChart },
+                { "Cmdr Status",     MenuCommandCommanderStatus },
+                { "Quests/Cargo",    0 },
+                { "Save Game",       MenuGameSnapshot },
+                { "High Scores",     MenuGameHighScores },
+                { "New Game",        MenuGameNewGame },
+            };
+            static const int _NMENU = (int)(sizeof(_menu)/sizeof(_menu[0]));
+            int msel = 0;
+
+            /* Draw menu overlay */
+            #define _DRAW_MENU() do {                 int _mi;                 ui_clear_body();                 ui_title("DOCKED MENU");                 for (_mi = 0; _mi < _NMENU; _mi++) {                     ui_printf(0, UI_BODY_TOP + _mi, _mi == msel ? PAL_HILIGHT : PAL_NORMAL,                         " %s%s", _mi == msel ? "> " : "  ", _menu[_mi].label);                 }                 ui_status("UP/DN=item  A=select  B=cancel");             } while(0)
+
+            _DRAW_MENU();
+            Boolean menu_done = false;
+            while (!menu_done && _next_screen == SCREEN_NONE) {
+                u16 mjoy = wait_button();
+                if (mjoy & BTN_DOWN) { if (msel < _NMENU-1) msel++; _DRAW_MENU(); }
+                if (mjoy & BTN_UP)   { if (msel > 0) msel--;         _DRAW_MENU(); }
+                if (mjoy & BTN_B)    { menu_done = true; } /* cancel */
+                if (mjoy & BTN_A) {
+                    menu_done = true;
+                    if (_menu[msel].cmd == 0) {
+                        /* Quests/Cargo — show sub-menu */
+                        ui_goto_screen(SCREEN_QUESTS);
+                    } else {
+                        deliver_cmd(SystemInformationFormHandleEvent,
+                                    _menu[msel].cmd);
+                    }
+                }
+            }
+            #undef _DRAW_MENU
+            /* Redraw system info if we cancelled and didn't navigate away */
+            if (_next_screen == SCREEN_NONE) {
+                deliver_open(SystemInformationFormHandleEvent, SystemInformationForm);
+                ui_clear_body();
+                ui_title(SolarSystemName[CURSYSTEM.NameIndex]);
+                ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL, "Tech   : %-14s", TechLevel[CURSYSTEM.TechLevel]);
+                ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "Govt   : %-14s", Politics[CURSYSTEM.Politics].Name);
+                ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL, "Police : %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPolice]);
+                ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL, "Pirates: %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPirates]);
+                ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL, "Size   : %-14s", SystemSize[CURSYSTEM.Size]);
+                ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL, "Res    : %-14s", SpecialResources[CURSYSTEM.SpecialResources]);
+                ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL, "Status : %-14s", Status[CURSYSTEM.Status]);
+                ui_printf(0, UI_BODY_TOP + 8, PAL_NORMAL, "Fuel   : %d/%d  Credits: %ld",
+                          (int)Ship.Fuel, (int)Shiptype[Ship.Type].FuelTanks, Credits);
+                ui_status("A=Warp  B=Menu  C=Status  S=News");
+            }
+            continue;  /* don't break — re-enter event loop */
         }
         if (joy & BTN_C) {
             ui_goto_screen(SCREEN_COMMANDER_STATUS);
@@ -415,7 +453,6 @@ static void screen_system_info(void)
  * --------------------------------------------------------------------- */
 static void screen_warp(void)
 {
-    int cursor = COMMANDER.CurSystem;
     int i, n = 0;
     /* Build list of reachable + nearby systems */
     int nearby[MAXSOLARSYSTEM];
@@ -554,7 +591,7 @@ static void screen_galactic_chart(void)
     int sel = COMMANDER.CurSystem;
     int top = 0;
     int vis = 10;
-    int i, n = MAXSOLARSYSTEM;
+    int n = MAXSOLARSYSTEM;
 
     #define DRAW_GAL() do { \
         ui_clear_body(); \
@@ -742,7 +779,7 @@ static void screen_discard_cargo(void)
                 draw_cargo_list(sel, 0);
             }
         }
-        if (joy & BTN_B) { ui_goto_screen(SCREEN_PLUNDER); break; }
+        if (joy & BTN_B) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
         if (_next_screen != SCREEN_NONE) break;
     }
 }
@@ -1078,11 +1115,12 @@ static void screen_plunder(void)
             draw_plunder();
         }
         if (joy & BTN_B) {
-            ui_goto_screen(SCREEN_PLUNDER);
+            /* Back to encounter — player may want to attack/flee instead */
+            ui_goto_screen(SCREEN_ENCOUNTER);
             break;
         }
         if (joy & BTN_START) {
-            /* Done plundering - go back to system info via Travel() continuation */
+            /* Done plundering — continue the game flow via Travel() */
             if (EncounterType == MARIECELESTEENCOUNTER && Ship.Cargo[NARCOTICS] > 0)
                 JustLootedMarie = true;
             Travel();
@@ -1905,9 +1943,6 @@ static void screen_new_commander(void)
 
     /* Field indices */
     enum { F_DIFF=0, F_PILOT, F_FIGHT, F_TRADE, F_ENG, F_COUNT };
-    static const char* field_labels[] = {
-        "Difficulty", "Pilot", "Fighter", "Trader", "Engineer"
-    };
 
     int name_idx = 0;
     int field    = F_PILOT;   /* start on Pilot */
@@ -1991,7 +2026,6 @@ static void screen_new_commander(void)
             switch (field) {
                 case F_DIFF:
                     Difficulty = (Byte)(Difficulty + inc);
-                    if ((int)Difficulty < 0)            Difficulty = 0;
                     if ((int)Difficulty >= MAXDIFFICULTY) Difficulty = MAXDIFFICULTY - 1;
                     break;
                 case F_PILOT:
@@ -2061,6 +2095,7 @@ void palm_form_to_screen(int formID)
         case DumpCargoForm:       sid = SCREEN_DUMP_CARGO;    break;
         case ShipYardForm:           sid = SCREEN_SHIPYARD;         break;
         case BuyShipForm:            sid = SCREEN_BUY_SHIP;         break;
+        case ShiptypeInfoForm:       sid = SCREEN_BUY_SHIP;         break;
         case BuyEquipmentForm:       sid = SCREEN_BUY_EQUIPMENT;    break;
         case SellEquipmentForm:      sid = SCREEN_SELL_EQUIPMENT;   break;
         case PersonnelRosterForm:    sid = SCREEN_PERSONNEL;        break;

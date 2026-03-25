@@ -21,9 +21,9 @@ static void show_splash(void)
 {
     ui_clear_screen();
     ui_printf(4,  4, PAL_TITLE,  " ___  ___  _   ___ ___  ");
-    ui_printf(4,  5, PAL_TITLE,  "/ __|| _ \/ \ / __| __| ");
-    ui_printf(4,  6, PAL_TITLE,  "\__ \|  _/ _ \| (__| _|  ");
-    ui_printf(4,  7, PAL_TITLE,  "|___/|_|/_/ \_\___|___| ");
+    ui_printf(4,  5, PAL_TITLE,  "/ __|| _ |/ | / __| __| ");
+    ui_printf(4,  6, PAL_TITLE,  "|__ ||  _/ _ | (__| _|  ");
+    ui_printf(4,  7, PAL_TITLE,  "|___/|_|/_/ |_|___|___| ");
     ui_printf(3,  9, PAL_HILIGHT,"  T R A D E R  1 . 2 . 0 ");
     ui_printf(0, 11, PAL_NORMAL, "  Sega Genesis Port          ");
     ui_printf(0, 12, PAL_DIM,    "  Pieter Spronck / SGDK 1.70 ");
@@ -37,8 +37,9 @@ static void show_splash(void)
 /* -----------------------------------------------------------------------
  * Main entry point
  * --------------------------------------------------------------------- */
-int main(void)
+bool main(bool hardReset)
 {
+    (void)hardReset;
     VDP_setScreenWidth320();
     kprintf("main: start");
     ui_init();
@@ -99,5 +100,5 @@ int main(void)
 
     GenAppStop();
     for (;;) ui_vsync();
-    return 0;
+    return true;
 }

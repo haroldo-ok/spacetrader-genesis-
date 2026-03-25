@@ -33,6 +33,7 @@
  **********************************************************************/
 
 #include "external.h"
+extern void ClearHighScores(void);  /* Traveler.c */
 
 // *************************************************************************
 // The standard menu handling of all "Docked" forms.

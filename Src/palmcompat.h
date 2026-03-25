@@ -9,6 +9,21 @@
 #ifndef PALMCOMPAT_H
 #define PALMCOMPAT_H
 
+/* Suppress warnings that are inherent to Palm->Genesis compatibility.
+ * These categories are all pre-existing in the original Palm source. */
+#pragma GCC diagnostic ignored "-Wunused-value"
+#pragma GCC diagnostic ignored "-Wdiscarded-qualifiers"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#pragma GCC diagnostic ignored "-Wchar-subscripts"
+#pragma GCC diagnostic ignored "-Wdangling-else"
+#pragma GCC diagnostic ignored "-Wparentheses"
+#pragma GCC diagnostic ignored "-Wmisleading-indentation"
+#pragma GCC diagnostic ignored "-Woverflow"
+#pragma GCC diagnostic ignored "-Wint-conversion"
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
+
+
 /* SGDK 1.70: no stdlib headers available in the cross-compiler.
  * genesis.h (included first by every .c) provides types.h which gives us
  * u8/u16/u32/s8/s16/s32/bool/TRUE/FALSE/NULL.
@@ -105,13 +120,22 @@ typedef int16_t   Coord;
 /* -----------------------------------------------------------------------
  * String functions – Palm names -> C stdlib
  * --------------------------------------------------------------------- */
+/* String function forward declarations for -fno-builtin builds */
+extern __SIZE_TYPE__ strlen(const char* s);
+extern char* strcpy(char* dst, const char* src);
+extern char* strncpy(char* dst, const char* src, __SIZE_TYPE__ n);
+extern char* strcat(char* dst, const char* src);
+extern char* strncat(char* dst, const char* src, __SIZE_TYPE__ n);
+extern int   strcmp(const char* a, const char* b);
+extern int   strncmp(const char* a, const char* b, __SIZE_TYPE__ n);
+extern int   atoi(const char* s);
 #define StrLen(s)           strlen(s)
 #define StrCopy(d,s)        strcpy(d,s)
 #define StrNCopy(d,s,n)     strncpy(d,s,n)
 #define StrCat(d,s)         strcat(d,s)
 #define StrCompare(a,b)     strcmp(a,b)
 #define StrNCompare(a,b,n)  strncmp(a,b,n)
-#define StrIToA(buf,val)    sprintf(buf,"%ld",(long)(val))
+#define StrIToA(buf,val)    (sprintf((buf),"%ld",(long)(val)), (buf))
 #define StrAToI(s)          atoi(s)
 #define StrPrintF           sprintf
 #define StrVPrintF          vsprintf
@@ -164,6 +188,14 @@ extern Boolean GEN_FrmDispatchEvent(struct _EventType* ep);
 
 /* Alerts – routed to UI message box */
 extern void GEN_Alert(const char* msg);
+/* Forward declarations so FrmAlert/FrmCustomAlert macros work
+ * in files that include external.h but not ui.h */
+#ifndef UI_ALERT_DECLARED
+#define UI_ALERT_DECLARED
+extern int  ui_alert_id(int alertID);
+extern int  ui_custom_alert(int id, const char* s1,
+                            const char* s2, const char* s3);
+#endif
 #define FrmAlert(id)            ui_alert_id(id)
 /* FrmCustomAlert: show alert with substitution strings */
 #define FrmCustomAlert(id,s1,s2,s3) ui_custom_alert(id,s1,s2,s3)
@@ -402,9 +434,9 @@ typedef struct { uint8_t r,g,b; } RGBColorType;
 
 /* FrmInitForm – on Genesis, forms are not real widgets; we just return
  * the formID cast as a pointer so form-management code compiles cleanly. */
-#define FrmInitForm(id)              ((FormPtr)(intptr_t)(id))
+#define FrmInitForm(id)              ((FormPtr)((long)(id)))
 #define FrmDeleteForm(f)             ((void)0)
-#define FrmGetFormPtr(id)            ((FormPtr)(intptr_t)(id))
+#define FrmGetFormPtr(id)            ((FormPtr)((long)(id)))
 /* FrmSetEventHandler – stores handler; implemented in ui.c */
 extern void GEN_FrmSetEventHandler(FormPtr frm, void* handler);
 #define FrmSetEventHandler(f,h)      GEN_FrmSetEventHandler(f, (void*)(h))
@@ -461,27 +493,22 @@ extern void GEN_EvtAddEventToQueue(const EventType* ep);
 #define evtWaitForever               (-1)
 
 /* FntCharsInWidth – used in Draw.c for text wrapping */
-#ifndef FNTCHARSINWIDTH_STUB_DEFINED
-#define FNTCHARSINWIDTH_STUB_DEFINED
 #ifndef FNTCHARSINWIDTH_DEFINED
 #define FNTCHARSINWIDTH_DEFINED
-#ifndef FNTCHARSINWIDTH_DEFINED
-#define FNTCHARSINWIDTH_DEFINED
-static inline void FntCharsInWidth_stub(const char* s, int16_t* w,
-                                        int16_t* len, Boolean* fits)
+static inline void FntCharsInWidth_stub(const char* s, int* w,
+                                        int* len, Boolean* fits)
 {
-    int maxw = w ? *w : 160;
+    int maxw = (w && *w > 0) ? *w : 160;
     int slen = (int)strlen(s);
-    if (len && *len > slen) *len = (int16_t)slen;
-    int used = (len && *len > 0) ? (*len * 6) : (slen * 6);
+    int lim  = (len && *len > 0 && *len < slen) ? *len : slen;
+    int used = lim * 6;
     if (fits) *fits = (used <= maxw);
-    if (len && used > maxw) *len = (int16_t)(maxw / 6);
-    if (w) *w = (int16_t)((len ? *len : slen) * 6);
+    if (used > maxw) lim = maxw / 6;
+    if (w)   *w   = lim * 6;
+    if (len) *len = lim;
 }
 #define FntCharsInWidth(s,w,l,f)     FntCharsInWidth_stub(s,w,l,f)
 #endif /* FNTCHARSINWIDTH_DEFINED */
-#endif /* FNTCHARSINWIDTH_DEFINED */
-#endif /* FNTCHARSINWIDTH_STUB_DEFINED */
 
 /* SysCopyStringResource / SysStringByIndex – string resources (no-op) */
 #define SysCopyStringResource(b,id)  ((void)0)

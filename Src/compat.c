@@ -8,6 +8,9 @@
 
 #include "genesis.h"
 #include "compat.h"
+extern void* memcpy(void* d, const void* s, __SIZE_TYPE__ n);
+extern __SIZE_TYPE__ strlen(const char* s);
+
 
 /* -----------------------------------------------------------------------
  * memmove – safe overlapping copy (libmd only has memcpy)

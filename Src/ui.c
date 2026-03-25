@@ -31,6 +31,14 @@ typedef __builtin_va_list va_list;
 #define va_end(v)      __builtin_va_end(v)
 #define va_arg(v,l)    __builtin_va_arg(v,l)
 
+/* String/memory function declarations for -fno-builtin builds */
+extern __SIZE_TYPE__ strlen(const char* s);
+extern void* memset(void* s, int c, __SIZE_TYPE__ n);
+extern void* memcpy(void* d, const void* s, __SIZE_TYPE__ n);
+extern char* strncpy(char* d, const char* s, __SIZE_TYPE__ n);
+extern char* strncat(char* d, const char* s, __SIZE_TYPE__ n);
+
+
 /* =========================================================================
  * §1  Globals
  * ====================================================================== */
@@ -240,14 +248,12 @@ Boolean sram_has_save(void)
 
 void sram_save_game(void)
 {
-    extern void sram_save_full(SAVEGAMETYPE*);
-    sram_save_full(&SaveGame);
+    /* sram_save_full is called directly from SaveGame() in Merchant.c */
 }
 
 void sram_load_game(void)
 {
-    extern void sram_load_full(SAVEGAMETYPE*);
-    sram_load_full(&SaveGame);
+    /* sram_load_full is called directly from LoadGame() in Merchant.c */
 }
 
 __attribute__((used)) void sram_save_full(SAVEGAMETYPE* sg)
@@ -331,7 +337,7 @@ static const AE _atbl[] = {
     {6800,"The antidote was destroyed.",0},
     {6900,"You need an escape pod to get insurance.",0},
     {7200,"Outdated software — update needed.",0},
-    {7300,"No room to scoop fuel.",0},
+    {7300,"No room to scoop fuel. Let it go?",1},
     {7900,"Squeek!",0},
     {8000,"Tribbles ate your narcotics!",0},
     {8100,"You bought a moon! Congratulations!",0},
@@ -384,7 +390,7 @@ static const AE _atbl[] = {
     {15000,"Tribbles irradiated.",0},
     {15100,"All tribbles irradiated.",0},
     {15200,"Wild is afraid of the reactor!",0},
-    {15300,"Wild won't stay on board with the reactor.",0},
+    {15300,"Wild won't stay on board with the reactor. Say goodbye?",1},
     {15600,"You yield the narcotics.",0},
     {15700,"Hull upgrade installed!",0},
     {15800,"No system selected.",0},
@@ -426,6 +432,31 @@ static const AE _atbl[] = {
     {16500,"Disable scoring for this game?",1},
     {16700,"This might affect your record. Continue?",1},
     {16800,"Switch to another game?",1},
+    {6000,"Clear high scores?",1},
+    {7000,"Stop insurance?",1},
+    {7400,"Sell this item?",1},
+    {9700,"Surrender to aliens?",1},
+    {17300,"Enable rectangular buttons?",1},
+    {4900,"Retire from the game?",1},
+    {6100,"You found an Easter egg!",0},
+    {6300,"Buy an escape pod?",1},
+    {7100,"Cannot afford insurance premium.",0},
+    {7500,"Still want to flee/bribe? (No=cancel)",1},
+    {7800,"Cannot afford the wormhole toll.",0},
+    {8500,"Attack by accident! Continue attack?",1},
+    {8600,"Attack this trader?",1},
+    {9100,"Tribbles sold!",0},
+    {9500,"Your mercenaries have left.",0},
+    {10200,"You received a fuel compactor!",0},
+    {10900,"You fly through a fabric rip!",0},
+    {11600,"Training completed! Skill increased.",0},
+    {17100,"Switching to a new game.",0},
+    {17400,"Enable rectangular buttons?",0},
+    {5900,"You can't buy a ship while carrying equipment.",0},
+    {7600,"Sure you want to submit? (No=keep fighting)",1},
+    {7700,"Wormhole out of range from here.",0},
+    {8800,"Surrender to this opponent?",1},
+    {12600,"Cannot afford the newspaper.",0},
     {0,NULL,0}
 };
 
@@ -482,11 +513,11 @@ __attribute__((used)) void GEN_FrmGotoForm(int formID)
 }
 
 __attribute__((used)) int     GEN_FrmGetActiveFormID(void) { return ui_current_form; }
-__attribute__((used)) FormPtr GEN_FrmGetActiveForm(void)   { return (FormPtr)(intptr_t)ui_current_form; }
+__attribute__((used)) FormPtr GEN_FrmGetActiveForm(void)   { return (void*)((long)ui_current_form); }
 
 __attribute__((used)) void GEN_FrmSetEventHandler(FormPtr frm, void* fn)
 {
-    int id = (int)(intptr_t)frm, i;
+    int id = (int)((long)frm), i;
     for (i = 0; i < _hndl_n; i++)
         if (_hndl[i].id == id) { _hndl[i].fn = (FormEventHandlerType*)fn; return; }
     if (_hndl_n < MAX_HANDLERS) {
@@ -620,7 +651,7 @@ static int _qty_dialog(const char* title, int max_qty)
  * ====================================================================== */
 __attribute__((used)) u16 GEN_FrmDoDialog(FormPtr frm)
 {
-    int formID = (int)(intptr_t)frm;
+    int formID = (int)((long)frm);
     char body[256];
     int  result;
 

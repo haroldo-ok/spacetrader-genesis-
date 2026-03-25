@@ -263,6 +263,9 @@ extern SHIP SpaceMonster;
 extern SHIP Scarab;
 extern SHIP Dragonfly;
 
+/* UI shared state */
+extern char ui_field_buf[64];   /* defined in ui.c */
+
 /* SRAM full save/load – defined in ui.c, SAVEGAMETYPE needed */
 extern void    sram_save_full(SAVEGAMETYPE* sg);
 extern void    sram_load_full(SAVEGAMETYPE* sg);

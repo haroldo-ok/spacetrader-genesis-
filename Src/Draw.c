@@ -55,6 +55,7 @@
 #endif
 
 #include "external.h"
+#include "compat.h"
 
 // *************************************************************************
 // Make button rectangular

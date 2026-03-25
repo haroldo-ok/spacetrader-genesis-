@@ -50,3 +50,4 @@ void MenuEraseStatus(void* menuPtr);
  * palmcompat.h) and call KLog() directly.                             */
 
 #endif /* COMPAT_H */
+
