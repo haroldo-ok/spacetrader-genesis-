@@ -36,6 +36,7 @@
 #include "external.h"
 #include "compat.h"
 #include "ui.h"
+#include "ui_screens.h"
 
 #define ourMinVersion	sysMakeROMVersion(2,0,0,sysROMStageRelease,0)
 void UnpackBooleans(Byte _val, Boolean *_a, Boolean *_b, Boolean *_c, Boolean *_d,
@@ -506,6 +507,15 @@ static void AppStop(void)
 // This routine is the event loop for the application. 
 // ************************************************************************* 
 static void AppEventLoop(void)
+{
+    /* AppEventLoop is now a thin wrapper around ui_game_loop.
+     * The new architecture uses direct screen functions instead
+     * of the Palm OS form/event dispatch system. */
+    ui_game_loop();
+    /* Legacy event loop removed - see ui_screens.c */
+}
+
+void AppEventLoop_legacy(void)
 {
     /* Genesis port: main game loop.
      * We poll joypad via ui_vsync() (called inside GEN_EvtGetEvent),

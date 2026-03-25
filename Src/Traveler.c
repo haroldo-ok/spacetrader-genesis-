@@ -1,5 +1,6 @@
 /* Genesis port: SRAM needed for high scores */
 #include "genesis.h"
+#include "ui_screens.h"
 #include "compat.h"
 /***********************************************************************
  *

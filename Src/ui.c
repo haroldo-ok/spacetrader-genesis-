@@ -1,1286 +1,1054 @@
 /**
- * ui.c  –  Genesis UI engine for Space Trader
+ * ui.c  —  Space Trader Genesis  —  UI engine
  *
- * Implements:
- *   • VDP tile-based text rendering (40×28 character grid)
- *   • Joypad polling
- *   • UIList, UITextInput, UISpinner widgets
- *   • Message box / yes-no dialog
- *   • Galactic chart renderer
- *   • SRAM save/load
- *   • All Palm OS API stubs called from palmcompat.h macros
+ * Section map:
+ *   §1   Globals
+ *   §2   Palette
+ *   §3   Init & vsync
+ *   §4   Text rendering
+ *   §5   Modal dialogs (alert / confirm)
+ *   §6   SRAM
+ *   §7   Alert table (all 166 Palm alert IDs)
+ *   §8   Palm form stubs
+ *   §9   Label/field/control storage
+ *   §10  Quantity spinner (_qty_dialog)
+ *   §11  GEN_FrmDoDialog — every modal form
+ *   §12  Field access
+ *   §13  Control & list values
+ *   §14  Win rendering no-ops
+ *   §15  Event queue
+ *   §16  System misc (RNG, ticks)
+ *   §17  Memory pool
+ *   §18  Dummy control
  */
 
-/* genesis.h first — defines u8/u16/u32, size_t (via string.h), min/max, etc. */
 #include "genesis.h"
-/* ui.h → palmcompat.h → genesis.h (guarded); brings in all Palm compat types */
 #include "ui.h"
-/* external.h → spacetrader.h; brings in game types and global externs */
 #include "external.h"
 
-/* va_list — GCC builtin type; may not be typedef'd by SGDK's string.h */
-#ifndef _VA_LIST
-#define _VA_LIST
 typedef __builtin_va_list va_list;
-#endif
-/* va_start/va_end/va_arg are defined as macros by SGDK's string.h via
- * __builtin_va_start etc.  vsnprintf/snprintf implemented in compat.c. */
+#define va_start(v,l)  __builtin_va_start(v,l)
+#define va_end(v)      __builtin_va_end(v)
+#define va_arg(v,l)    __builtin_va_arg(v,l)
 
-/* -----------------------------------------------------------------------
- * Globals
- * --------------------------------------------------------------------- */
-uint16_t ui_joy_pressed;
-uint16_t ui_joy_held;
-uint32_t ui_frame_count;
-int      ui_current_form;
-char     ui_field_buf[32];
-int      ui_ctrl_values[UI_MAX_CONTROLS];
+/* =========================================================================
+ * §1  Globals
+ * ====================================================================== */
+u16  ui_joy_pressed;
+u16  ui_joy_held;
+u32  ui_frame_count;
+int  ui_current_form;
+char ui_field_buf[64];
 
-/* ROM version – satisfies "BELOW35" guards (always false = modern) */
-uint32_t romVersion = 0x03503000UL;
+u32 romVersion = 0x03503000UL;   /* satisfies BELOW35 guards */
 
-/* -----------------------------------------------------------------------
- * Static scratch buffer for printf formatting
- * --------------------------------------------------------------------- */
-static char _fmt_buf[128];
-
-/* -----------------------------------------------------------------------
- * Palette setup
- * We use a simple 4-colour greyscale-ish palette for text.
- * SGDK colour format: 0x0BGR (each nibble 0-7)
- * --------------------------------------------------------------------- */
-static const uint16_t ui_palette[16] = {
-    0x0000,   /* 0 – black (background)     */
-    0x0EEE,   /* 1 – white  (normal text)    */
-    0x00EE,   /* 2 – yellow (highlighted)    */
-    0x0E00,   /* 3 – cyan   (title)          */
-    0x00E0,   /* 4 – green  (status)         */
-    0x000E,   /* 5 – red    (warning)        */
-    0x0888,   /* 6 – grey   (dim)            */
-    0x0EE0,   /* 7 – light cyan              */
-    0,0,0,0,0,0,0,0
+/* =========================================================================
+ * §2  Palette
+ *
+ * SGDK colour: 0x0BGR, each nibble 0-7.
+ * Four hardware palettes (PAL0-PAL3):
+ *   PAL0  white      PAL_NORMAL
+ *   PAL1  yellow     PAL_HILIGHT, PAL_WARN
+ *   PAL2  cyan       PAL_TITLE
+ *   PAL3  dark green PAL_STATUS, PAL_DIM
+ * ====================================================================== */
+static const u16 _pal_data[64] = {
+    /* PAL0 white */
+    0x0000,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,
+    0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,
+    /* PAL1 yellow */
+    0x0000,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,
+    0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,
+    /* PAL2 cyan */
+    0x0000,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,
+    0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,
+    /* PAL3 dark green */
+    0x0000,0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,
+    0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,
 };
 
-/* -----------------------------------------------------------------------
- * ui_init – set up palette, clear screen, load font
- * SGDK provides a built-in 8×8 ASCII font via VDP_drawText / BMP_init.
- * We use VDP_drawText which writes to plane A by default;
- * we redirect everything to plane B so we can use plane A for the galaxy map.
- * --------------------------------------------------------------------- */
+static const u8 _pal_hw[6] = { 0,1,2,3,1,3 };
+/*                               N  H  T  S  W  D  */
+
+/* =========================================================================
+ * §3  Init & vsync
+ * ====================================================================== */
 void ui_init(void)
 {
-    /* Set palette 0 */
-    PAL_setColors(0, ui_palette, 16, CPU);
-
-    /* Use SGDK built-in font (already loaded) */
-    /* VDP_setPlane not needed in SGDK 1.70 - text goes to BG_A */
+    PAL_setColors(0, _pal_data, 64, CPU);
     VDP_clearPlane(BG_A, TRUE);
     VDP_clearPlane(BG_B, TRUE);
-
-    ui_frame_count   = 0;
-    ui_current_form  = 0;
-    ui_joy_pressed   = 0;
-    ui_joy_held      = 0;
-    memset(ui_ctrl_values, 0, sizeof(ui_ctrl_values));
-    ui_field_buf[0]  = '\0';
+    ui_frame_count = ui_current_form = ui_joy_pressed = ui_joy_held = 0;
+    ui_field_buf[0] = '\0';
+    kprintf("ui_init done");
 }
 
-/* -----------------------------------------------------------------------
- * Frame sync + input polling
- * --------------------------------------------------------------------- */
 void ui_vsync(void)
 {
+    u16 cur;
     SYS_doVBlankProcess();
     ui_frame_count++;
-
-    uint16_t cur = JOY_readJoypad(JOY_1);
+    cur = JOY_readJoypad(JOY_1);
     ui_joy_pressed = cur & ~ui_joy_held;
     ui_joy_held    = cur;
 }
 
-/* -----------------------------------------------------------------------
- * Text rendering helpers
- * --------------------------------------------------------------------- */
-void ui_clear_screen(void)
-{
-    VDP_clearPlane(BG_A, TRUE);
-    VDP_clearPlane(BG_B, TRUE);
-}
+/* =========================================================================
+ * §4  Text rendering
+ * ====================================================================== */
+void ui_clear_screen(void) { VDP_clearPlane(BG_A, TRUE); }
 
 void ui_clear_body(void)
 {
-    for (uint8_t r = UI_BODY_TOP; r <= UI_BODY_BOT; r++)
-        ui_clear_row(r);
+    u8 r;
+    for (r = UI_BODY_TOP; r <= UI_BODY_BOT; r++)
+        VDP_clearTextLine(r);
 }
 
-void ui_clear_row(uint8_t row)
-{
-    /* Overwrite with spaces */
-    char spaces[UI_COLS + 1];
-    memset(spaces, ' ', UI_COLS);
-    spaces[UI_COLS] = '\0';
-    VDP_clearTextLine(row);
-}
+void ui_clear_row(u8 row) { VDP_clearTextLine(row); }
 
-/*
- * ui_print – draw string s at (col, row) with palette index pal.
- * SGDK 1.70: VDP_drawText() writes to BG_A with current text palette.
- * To use different "palettes" (colour attributes) we set the tile
- * attribute word manually.
- *
- * In this port we simplify: PAL_HILIGHT / PAL_TITLE differences are
- * conveyed by enclosing brackets or padding.  Full per-tile palette
- * attributes require writing raw tile map data; we do that only for
- * the title and status bars.
- */
-void ui_print(uint8_t col, uint8_t row, uint8_t pal, const char* s)
+void ui_print(u8 col, u8 row, u8 pal, const char* s)
 {
-    /* SGDK 1.70: use text palette to indicate colour, then draw */
-    /* Palette mapping: 0=white(normal), 1=yellow(hilight), 2=cyan(title),
-     *                  3=green(status), 4=red(warn), 5=grey(dim) */
-    static const uint8_t _pal_map[] = {0, 0, 1, 2, 3, 0};
-    uint8_t vdp_pal = (pal < 6) ? _pal_map[pal] : 0;
-    VDP_setTextPalette(vdp_pal);
+    u8 hw = (pal < 6) ? _pal_hw[pal] : 0;
+    VDP_setTextPalette(hw);
     VDP_drawText(s, col, row);
-    VDP_setTextPalette(0);  /* restore default */
+    VDP_setTextPalette(0);
 }
 
-void ui_printf(uint8_t col, uint8_t row, uint8_t pal, const char* fmt, ...)
+void ui_printf(u8 col, u8 row, u8 pal, const char* fmt, ...)
 {
+    char buf[UI_COLS + 1];
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(_fmt_buf, sizeof(_fmt_buf), fmt, ap);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
-    ui_print(col, row, pal, _fmt_buf);
+    ui_print(col, row, pal, buf);
 }
 
-void ui_title(const char* title)
+void ui_title(const char* t)
 {
     char buf[UI_COLS + 1];
-    int len = (int)strlen(title);
-    int pad = (UI_COLS - len) / 2;
-    memset(buf, '-', UI_COLS);
+    int len = (int)strlen(t);
+    int pad = (UI_COLS - len - 2) / 2;
+    int i = 0;
+    while (i < pad)               buf[i++] = '=';
+    buf[i++] = ' ';
+    while (*t && i < UI_COLS - 1) buf[i++] = *t++;
+    buf[i++] = ' ';
+    while (i < UI_COLS)           buf[i++] = '=';
     buf[UI_COLS] = '\0';
-    if (pad >= 0 && len <= UI_COLS)
-        memcpy(buf + pad, title, len);
     ui_print(0, UI_TITLE_ROW, PAL_TITLE, buf);
+    VDP_clearTextLine(UI_SEP_ROW);
 }
 
-void ui_status(const char* hints)
+void ui_status(const char* s)
 {
     char buf[UI_COLS + 1];
-    int len = (int)strlen(hints);
-    memset(buf, ' ', UI_COLS);
+    int i = 0;
+    while (*s && i < UI_COLS) buf[i++] = *s++;
+    while (i < UI_COLS)       buf[i++] = ' ';
     buf[UI_COLS] = '\0';
-    if (len > UI_COLS) len = UI_COLS;
-    memcpy(buf, hints, len);
     ui_print(0, UI_STATUS_ROW, PAL_STATUS, buf);
 }
 
-void ui_hline(uint8_t row)
+void ui_status_fmt(const char* fmt, ...)
 {
     char buf[UI_COLS + 1];
-    memset(buf, '-', UI_COLS);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    ui_status(buf);
+}
+
+void ui_hline(u8 row)
+{
+    char buf[UI_COLS + 1];
+    int i;
+    for (i = 0; i < UI_COLS; i++) buf[i] = '-';
     buf[UI_COLS] = '\0';
     ui_print(0, row, PAL_DIM, buf);
 }
 
-/* -----------------------------------------------------------------------
- * UIList widget
- * --------------------------------------------------------------------- */
-void ui_list_init(UIList* lst, const char** items, uint8_t count,
-                  uint8_t start_row, uint8_t visible_rows,
-                  uint8_t col, uint8_t width)
-{
-    lst->items        = items;
-    lst->count        = count;
-    lst->cursor       = 0;
-    lst->scroll       = 0;
-    lst->visible_rows = visible_rows;
-    lst->start_row    = start_row;
-    lst->col          = col;
-    lst->width        = width;
-    lst->show_cursor  = true;
-}
+/* =========================================================================
+ * §5  Modal dialogs
+ * ====================================================================== */
 
-void ui_list_draw(UIList* lst)
+/* Word-wrap text into rows [start_row, UI_BODY_BOT-3].
+ * Returns the next free row. */
+static u8 _wrap(const char* text, u8 start_row, u8 pal)
 {
-    char buf[UI_COLS + 1];
-    for (uint8_t i = 0; i < lst->visible_rows; i++)
-    {
-        uint8_t idx = lst->scroll + i;
-        uint8_t row = lst->start_row + i;
-        if (idx >= lst->count)
-        {
-            /* blank remaining rows */
-            memset(buf, ' ', lst->width);
-            buf[lst->width] = '\0';
-            ui_print(lst->col, row, PAL_NORMAL, buf);
-            continue;
+    u8 row = start_row;
+    const char* p = text;
+    while (*p && row <= (u8)(UI_BODY_BOT - 3)) {
+        char line[UI_COLS + 1];
+        int k = 0;
+        const char* sp = NULL;
+        while (*p && k < UI_COLS) {
+            if (*p == '\n') { p++; break; }
+            if (*p == ' ')  sp = &line[k];
+            line[k++] = *p++;
         }
-        const char* item = lst->items[idx];
-        Boolean selected = lst->show_cursor && (idx == lst->cursor);
-        snprintf(buf, lst->width + 1, "%c%-*s",
-                 selected ? '>' : ' ',
-                 lst->width - 1, item);
-        ui_print(lst->col, row, selected ? PAL_HILIGHT : PAL_NORMAL, buf);
-    }
-    /* Scroll indicator */
-    if (lst->count > lst->visible_rows)
-    {
-        if (lst->scroll > 0)
-            ui_print(lst->col + lst->width, lst->start_row, PAL_DIM, "^");
-        if ((int)lst->scroll + lst->visible_rows < lst->count)
-            ui_print(lst->col + lst->width,
-                     lst->start_row + lst->visible_rows - 1, PAL_DIM, "v");
-    }
-}
-
-int ui_list_update(UIList* lst)
-{
-    if (ui_joy_pressed & BTN_DOWN)
-    {
-        if (lst->cursor + 1 < lst->count)
-        {
-            lst->cursor++;
-            if (lst->cursor >= lst->scroll + lst->visible_rows)
-                lst->scroll++;
-            ui_list_draw(lst);
+        if (*p && *p != '\n' && sp) {
+            int back = (int)(&line[k] - sp - 1);
+            p -= back; k -= back;
         }
+        line[k] = '\0';
+        ui_print(1, row++, pal, line);
     }
-    else if (ui_joy_pressed & BTN_UP)
-    {
-        if (lst->cursor > 0)
-        {
-            lst->cursor--;
-            if (lst->cursor < lst->scroll)
-                lst->scroll--;
-            ui_list_draw(lst);
-        }
-    }
-    else if (ui_joy_pressed & BTN_A)
-    {
-        return lst->cursor;
-    }
-    else if (ui_joy_pressed & BTN_B)
-    {
-        return UI_BACK;
-    }
-    return UI_NONE;
+    return row;
 }
 
-/* -----------------------------------------------------------------------
- * UITextInput widget (letter picker – no keyboard on Genesis)
- * --------------------------------------------------------------------- */
-static const char _alphabet[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    "abcdefghijklmnopqrstuvwxyz"
-    "0123456789 -_'";
-
-#define ALPHA_LEN  ((int)(sizeof(_alphabet)-1))
-#define ALPHA_COLS 13
-
-void ui_textinput_init(UITextInput* ti, uint8_t max_len,
-                       uint8_t start_row, uint8_t input_row)
-{
-    ti->buf[0]    = '\0';
-    ti->len       = 0;
-    ti->max_len   = max_len < 31 ? max_len : 31;
-    ti->char_row  = 0;
-    ti->char_col  = 0;
-    ti->start_row = start_row;
-    ti->input_row = input_row;
-}
-
-void ui_textinput_draw(UITextInput* ti)
-{
-    /* Show current text */
-    char buf[UI_COLS + 1];
-    snprintf(buf, sizeof(buf), "Name: %-*s", ti->max_len, ti->buf);
-    ui_print(0, ti->input_row, PAL_HILIGHT, buf);
-
-    /* Show alphabet grid */
-    int cur_idx = ti->char_row * ALPHA_COLS + ti->char_col;
-    for (int r = 0; r * ALPHA_COLS < ALPHA_LEN; r++)
-    {
-        memset(buf, ' ', UI_COLS);
-        buf[UI_COLS] = '\0';
-        for (int c = 0; c < ALPHA_COLS && r*ALPHA_COLS+c < ALPHA_LEN; c++)
-        {
-            int idx = r * ALPHA_COLS + c;
-            buf[c * 3]     = (idx == cur_idx) ? '[' : ' ';
-            buf[c * 3 + 1] = _alphabet[idx];
-            buf[c * 3 + 2] = (idx == cur_idx) ? ']' : ' ';
-        }
-        buf[ALPHA_COLS * 3] = '\0';
-        ui_print(0, ti->start_row + r, PAL_NORMAL, buf);
-    }
-    ui_print(0, ti->start_row + 7, PAL_DIM, "A=add  B=backspace  C=done");
-}
-
-Boolean ui_textinput_update(UITextInput* ti)
-{
-    int max_col = ALPHA_COLS - 1;
-    int max_row = (ALPHA_LEN - 1) / ALPHA_COLS;
-
-    if (ui_joy_pressed & BTN_RIGHT)
-    {
-        if (ti->char_col < max_col) ti->char_col++;
-        else { ti->char_col = 0; if (ti->char_row < max_row) ti->char_row++; }
-        ui_textinput_draw(ti);
-    }
-    else if (ui_joy_pressed & BTN_LEFT)
-    {
-        if (ti->char_col > 0) ti->char_col--;
-        else { ti->char_col = max_col; if (ti->char_row > 0) ti->char_row--; }
-        ui_textinput_draw(ti);
-    }
-    else if (ui_joy_pressed & BTN_DOWN)
-    {
-        if (ti->char_row < max_row) ti->char_row++;
-        if (ti->char_row * ALPHA_COLS + ti->char_col >= ALPHA_LEN)
-            ti->char_col = (ALPHA_LEN - 1) % ALPHA_COLS;
-        ui_textinput_draw(ti);
-    }
-    else if (ui_joy_pressed & BTN_UP)
-    {
-        if (ti->char_row > 0) ti->char_row--;
-        ui_textinput_draw(ti);
-    }
-    else if (ui_joy_pressed & BTN_A)
-    {
-        int idx = ti->char_row * ALPHA_COLS + ti->char_col;
-        if (ti->len < ti->max_len)
-        {
-            ti->buf[ti->len++] = _alphabet[idx];
-            ti->buf[ti->len]   = '\0';
-        }
-        ui_textinput_draw(ti);
-    }
-    else if (ui_joy_pressed & BTN_B)
-    {
-        if (ti->len > 0)
-        {
-            ti->buf[--ti->len] = '\0';
-            ui_textinput_draw(ti);
-        }
-    }
-    else if (ui_joy_pressed & BTN_C)
-    {
-        return ti->len > 0;  /* done only if name not empty */
-    }
-    return false;
-}
-
-/* -----------------------------------------------------------------------
- * UISpinner widget
- * --------------------------------------------------------------------- */
-void ui_spinner_init(UISpinner* sp, int32_t val, int32_t mn, int32_t mx,
-                     int32_t step, uint8_t row, uint8_t col, uint8_t w)
-{
-    sp->value   = val;
-    sp->min_val = mn;
-    sp->max_val = mx;
-    sp->step    = step;
-    sp->row     = row;
-    sp->col     = col;
-    sp->width   = w;
-}
-
-void ui_spinner_draw(UISpinner* sp)
-{
-    char buf[UI_COLS + 1];
-    snprintf(buf, sp->width + 1, "<%-*d>", sp->width - 2, (int)sp->value);
-    ui_print(sp->col, sp->row, PAL_HILIGHT, buf);
-}
-
-Boolean ui_spinner_update(UISpinner* sp)
-{
-    if (ui_joy_pressed & BTN_RIGHT)
-    {
-        sp->value += sp->step;
-        if (sp->value > sp->max_val) sp->value = sp->max_val;
-        ui_spinner_draw(sp);
-    }
-    else if (ui_joy_pressed & BTN_LEFT)
-    {
-        sp->value -= sp->step;
-        if (sp->value < sp->min_val) sp->value = sp->min_val;
-        ui_spinner_draw(sp);
-    }
-    else if (ui_joy_pressed & BTN_A)
-    {
-        return true;
-    }
-    return false;
-}
-
-/* -----------------------------------------------------------------------
- * Message box
- * --------------------------------------------------------------------- */
-Boolean ui_msgbox(const char* title, const char* msg, Boolean cancelable)
+void ui_alert(const char* msg)
 {
     ui_clear_body();
     ui_hline(UI_BODY_TOP);
-    ui_print(0, UI_BODY_TOP + 1, PAL_TITLE, title);
-    ui_hline(UI_BODY_TOP + 2);
+    _wrap(msg, UI_BODY_TOP + 1, PAL_NORMAL);
+    ui_status("A = OK");
+    for (;;) { ui_vsync(); if (ui_joy_pressed & BTN_A) return; }
+}
 
-    /* Word-wrap msg into body area */
-    char tmp[128];
-    strncpy(tmp, msg, 127);
-    tmp[127] = '\0';
-    char* line = tmp;
-    uint8_t row = UI_BODY_TOP + 3;
-    while (*line && row < UI_BODY_BOT - 2)
-    {
-        char row_buf[UI_COLS + 1];
-        int len = (int)strlen(line);
-        if (len > UI_COLS) len = UI_COLS;
-        /* try to break at space */
-        if ((int)strlen(line) > UI_COLS)
-        {
-            int brk = UI_COLS;
-            while (brk > 0 && line[brk] != ' ') brk--;
-            if (brk == 0) brk = UI_COLS;
-            len = brk;
-        }
-        strncpy(row_buf, line, len);
-        row_buf[len] = '\0';
-        ui_print(0, row++, PAL_NORMAL, row_buf);
-        line += len;
-        while (*line == ' ') line++;
-    }
-
-    if (cancelable)
-        ui_status("A=OK  B=Cancel");
-    else
-        ui_status("A=OK");
-
-    for (;;)
-    {
+int ui_confirm(const char* question)
+{
+    ui_clear_body();
+    ui_hline(UI_BODY_TOP);
+    _wrap(question, UI_BODY_TOP + 1, PAL_NORMAL);
+    ui_status("A = Yes    B = No");
+    for (;;) {
         ui_vsync();
-        if (ui_joy_pressed & BTN_A) return true;
-        if (cancelable && (ui_joy_pressed & BTN_B)) return false;
+        if (ui_joy_pressed & BTN_A) return 1;
+        if (ui_joy_pressed & BTN_B) return 0;
     }
 }
 
-Boolean ui_yesno(const char* question)
+/* =========================================================================
+ * §6  SRAM
+ * ====================================================================== */
+#define SRAM_MAGIC     0xC0DEu
+#define SRAM_MAGIC_OFF 0
+#define SRAM_DATA_OFF  2
+
+Boolean sram_has_save(void)
 {
-    return ui_msgbox("Question", question, true);
+    u16 m = 0;
+    SRAM_enable();
+    SRAM_readBuffer(&m, SRAM_MAGIC_OFF, sizeof(m));
+    SRAM_disable();
+    return m == SRAM_MAGIC;
 }
 
-/* -----------------------------------------------------------------------
- * Galactic chart renderer
- * Draws a 38×24 dot-map scaled from the 150×110 coordinate space.
- * --------------------------------------------------------------------- */
-void ui_draw_galaxy_map(void)
+void sram_save_game(void)
 {
-    /* We need spacetrader.h types; included via external.h in ui.h */
-    extern SOLARSYSTEM SolarSystem[];
-    /* MAXSOLARSYSTEM is a #define from spacetrader.h */
-    /* MAXSOLARSYSTEM is a #define, accessible via spacetrader.h */
-
-    ui_clear_body();
-    ui_title("GALACTIC CHART");
-
-    /* Draw a border */
-    char border[UI_COLS + 1];
-    memset(border, '-', UI_COLS);
-    border[UI_COLS] = '\0';
-    ui_print(0, UI_BODY_TOP,     PAL_DIM, border);
-    ui_print(0, UI_BODY_BOT - 1, PAL_DIM, border);
-
-    /* Plot each system as a single character */
-    for (int i = 0; i < MAXSOLARSYSTEM; i++)
-    {
-        int sx = SolarSystem[i].X;  /* 0..150 */
-        int sy = SolarSystem[i].Y;  /* 0..110 */
-        /* Map to tile grid [1..38] x [body_top+1 .. body_bot-2] */
-        uint8_t tx = 1 + (sx * 37) / 150;
-        uint8_t ty = (UI_BODY_TOP + 1) + (sy * (UI_BODY_BOT - UI_BODY_TOP - 3)) / 110;
-        if (tx >= UI_COLS) tx = UI_COLS - 1;
-        if (ty >= UI_BODY_BOT) ty = UI_BODY_BOT - 1;
-
-        char dot[2] = { SolarSystem[i].Visited ? '*' : '.', '\0' };
-        ui_print(tx, ty, SolarSystem[i].Visited ? PAL_HILIGHT : PAL_DIM, dot);
-    }
+    extern void sram_save_full(SAVEGAMETYPE*);
+    sram_save_full(&SaveGame);
 }
 
-/* -----------------------------------------------------------------------
- * SRAM save/load – full implementation is at the bottom of this file
- * (after DataTypes.h / SAVEGAMETYPE is in scope).
- * --------------------------------------------------------------------- */
-
-/* -----------------------------------------------------------------------
- * Palm OS API stub implementations
- * --------------------------------------------------------------------- */
-
-/* Form navigation – sets ui_current_form; the main loop calls the
- * appropriate screen handler after each FrmGotoForm call. */
-/* Pending frmOpenEvent flag */
-static int _pending_form_open = 0;
-/* Form handler registry (populated by GEN_FrmSetEventHandler) */
-#define MAX_FORM_HANDLERS 32
-static struct {
-    int                  formID;
-    FormEventHandlerType *handler;
-} _form_handlers[MAX_FORM_HANDLERS];
-static int _form_handler_count = 0;
-
-/* Form title / hint lookup table */
-static const struct { int id; const char* title; const char* hint; }
-_form_titles[] = {
-    { MainForm,              "SPACE TRADER",      "A=New Game" },
-    { NewCommanderForm,      "NEW COMMANDER",     "UP/DN=field  LR=value  A=OK" },
-    { SystemInformationForm, "SYSTEM INFO",       "A=Warp B=Buy C=Sell S=Yard" },
-    { GalacticChartForm,     "GALACTIC CHART",    "A=Warp B=Back" },
-    { WarpForm,              "WARP",              "A=Confirm B=Back" },
-    { ExecuteWarpForm,       "EXECUTE WARP",      "A=Warp B=Chart" },
-    { BuyCargoForm,          "BUY CARGO",         "A=Buy B=Back" },
-    { SellCargoForm,         "SELL CARGO",        "A=Sell B=Back" },
-    { ShipYardForm,          "SHIPYARD",          "A=Select B=Back" },
-    { BuyShipForm,           "BUY SHIP",          "A=Buy B=Back" },
-    { BuyEquipmentForm,      "BUY EQUIPMENT",     "A=Buy B=Back" },
-    { SellEquipmentForm,     "SELL EQUIPMENT",    "A=Sell B=Back" },
-    { CommanderStatusForm,   "COMMANDER STATUS",  "B=Back" },
-    { PersonnelRosterForm,   "PERSONNEL",         "A=Hire B=Back" },
-    { EncounterForm,         "ENCOUNTER",         "A=Atk B=Flee C=Ign S=Stop" },
-    { BankForm,              "BANK",              "A=Select B=Back" },
-    { SpecialEventForm,      "SPECIAL EVENT",     "A=OK" },
-    { CurrentShipForm,       "CURRENT SHIP",      "B=Back" },
-    { QuestsForm,            "QUESTS",            "B=Back" },
-    { PlunderForm,           "PLUNDER",           "A=Take B=Done" },
-    { AveragePricesForm,     "AVG PRICES",        "B=Back" },
-    { SpecialCargoForm,      "SPECIAL CARGO",     "A=OK" },
-    { 0, NULL, NULL }
-};
-
-__attribute__((used)) void GEN_FrmGotoForm(int formID)
+void sram_load_game(void)
 {
-    int i;
-    kprintf("FrmGotoForm: formID=%d (was %d)", formID, (int)ui_current_form);
-    kprintf("FrmGotoForm: id=%d registering handler", formID);
-    ui_current_form    = formID;
-    /* Synthesize frmLoadEvent immediately so AppHandleEvent registers
-     * the form-specific handler via FrmSetEventHandler. */
-    {
-        EventType load_ev;
-        Boolean handled;
-        memset(&load_ev, 0, sizeof(load_ev));
-        load_ev.eType              = frmLoadEvent;
-        load_ev.data.frmLoad.formID = (uint16_t)formID;
-        kprintf("FrmGotoForm: calling AppHandleEvent with frmLoadEvent=%d formID=%d",
-                (int)frmLoadEvent, formID);
-        handled = AppHandleEvent(&load_ev);
-        kprintf("FrmGotoForm: frmLoadEvent handled=%d, handlers_registered=%d",
-                (int)handled, _form_handler_count);
-    }
-    _pending_form_open = 1; /* frmOpenEvent delivered on next GEN_EvtGetEvent */
-
-    /* Clear body and draw form title immediately */
-    ui_clear_body();
-    for (i = 0; _form_titles[i].id != 0; i++)
-    {
-        if (_form_titles[i].id == formID)
-        {
-            ui_title(_form_titles[i].title);
-            ui_status(_form_titles[i].hint);
-            /* Draw static labels for forms that need them */
-            if (formID == NewCommanderForm) {
-                ui_printf(0,  8, PAL_NORMAL,  "Difficulty:");
-                ui_printf(0, 10, PAL_NORMAL,  "Pts left :");
-                ui_printf(0, 12, PAL_NORMAL,  "Pilot    :");
-                ui_printf(0, 15, PAL_NORMAL,  "Fighter  :");
-                ui_printf(0, 17, PAL_NORMAL,  "Trader   :");
-                ui_printf(0, 19, PAL_NORMAL,  "Engineer :");
-            }
-            return;
-        }
-    }
-    {
-        char tbuf[32];
-        snprintf(tbuf, sizeof(tbuf), "FORM %d", formID);
-        ui_title(tbuf);
-    }
+    extern void sram_load_full(SAVEGAMETYPE*);
+    sram_load_full(&SaveGame);
 }
-
-__attribute__((used)) int GEN_FrmGetActiveFormID(void)
-{
-    return ui_current_form;
-}
-
-__attribute__((used)) FormPtr GEN_FrmGetActiveForm(void)
-{
-    return (FormPtr)(intptr_t)ui_current_form;
-}
-
-/* -----------------------------------------------------------------------
- * Form event handler registry
- * On Palm OS, FrmSetEventHandler() registers a callback that
- * FrmDispatchEvent() invokes for every event on the active form.
- * We maintain a table of (formID → handler) pairs.
- * --------------------------------------------------------------------- */
-__attribute__((used)) void GEN_FrmSetEventHandler(FormPtr frm, void* handler)
-{
-    int id = (int)(intptr_t)frm;
-    int i;
-    /* Update existing entry */
-    for (i = 0; i < _form_handler_count; i++) {
-        if (_form_handlers[i].formID == id) {
-            _form_handlers[i].handler = (FormEventHandlerType*)handler;
-            kprintf("FrmSetEventHandler: updated form %d", id);
-            return;
-        }
-    }
-    /* Add new entry */
-    if (_form_handler_count < MAX_FORM_HANDLERS) {
-        _form_handlers[_form_handler_count].formID   = id;
-        _form_handlers[_form_handler_count].handler  = (FormEventHandlerType*)handler;
-        _form_handler_count++;
-        kprintf("FrmSetEventHandler: registered form %d", id);
-    }
-}
-
-__attribute__((used)) Boolean GEN_FrmDispatchEvent(EventType* ep)
-{
-    int i;
-    if (ep->eType != nilEvent)
-        kprintf("FrmDispatch: eType=%d form=%d", (int)ep->eType, (int)ui_current_form);
-    for (i = 0; i < _form_handler_count; i++) {
-        if (_form_handlers[i].formID == ui_current_form) {
-            if (_form_handlers[i].handler) {
-                return _form_handlers[i].handler(ep);
-            }
-        }
-    }
-    return false;
-}
-
-/* Alert system – map alert IDs to short messages */
-__attribute__((used)) void GEN_Alert(const char* msg)
-{
-    ui_msgbox("Alert", msg, false);
-}
-
-/* Alert IDs come from MerchantRsc.h; we look up a description table */
-static const struct { int id; const char* title; const char* msg; } _alerts[] = {
-    /* A selection of the most common alerts */
-    { 1000, "Out of Fuel",   "Not enough fuel for this trip!" },
-    { 1001, "Too Far",       "That system is out of range."   },
-    { 1010, "No Credits",    "You can't afford that."         },
-    { 1020, "Cargo Full",    "Your cargo bays are full."      },
-    { 1030, "Destroyed",     "Your ship has been destroyed!"  },
-    { 1040, "Arrested",      "You have been arrested!"        },
-    {    0, "Notice",        "OK"                             }
-};
-
-int GEN_FrmAlert(int alertID)
-{
-    for (int i = 0; _alerts[i].id != 0; i++)
-        if (_alerts[i].id == alertID)
-            return ui_msgbox(_alerts[i].title, _alerts[i].msg, false) ? 0 : 1;
-    /* Unknown alert – show ID as string */
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Alert #%d", alertID);
-    ui_msgbox("Notice", buf, false);
-    return 0;
-}
-
-/* Field text – we have one shared buffer (commander name, etc.) */
-__attribute__((used)) char* GEN_FldGetTextPtr(int fieldID)
-{
-    (void)fieldID;
-    return ui_field_buf;
-}
-
-__attribute__((used)) void GEN_FldSetTextFromStr(int fieldID, const char* s)
-{
-    (void)fieldID;
-    strncpy(ui_field_buf, s, sizeof(ui_field_buf) - 1);
-    ui_field_buf[sizeof(ui_field_buf) - 1] = '\0';
-}
-
-/* Control values – indexed by ID mod UI_MAX_CONTROLS */
-int GEN_CtlGetValue(int ctlID)
-{
-    return ui_ctrl_values[ctlID % UI_MAX_CONTROLS];
-}
-
-__attribute__((used)) void GEN_CtlSetValue(int ctlID, int val)
-{
-    ui_ctrl_values[ctlID % UI_MAX_CONTROLS] = val;
-}
-
-/* List selection */
-static int _lst_sel[8];
-int GEN_LstGetSelection(int lstID)
-{
-    return _lst_sel[lstID % 8];
-}
-__attribute__((used)) void GEN_LstSetSelection(int lstID, int item)
-{
-    _lst_sel[lstID % 8] = item;
-}
-
-/* Win drawing – convert Palm 160×160 coords to Genesis 320×224
- * (scale x by 2, y by 1.4, then map to tile grid row=y/8, col=x/8) */
-static inline uint8_t _px2col(int x) { return (uint8_t)(x * 2 / 8); }
-static inline uint8_t _py2row(int y) { return (uint8_t)(y * 14 / 80 / 8); }
-
-__attribute__((used)) void GEN_WinDrawChars(const char* s, int len, int x, int y)
-{
-    char buf[UI_COLS + 1];
-    int n = (len >= 0 && len < UI_COLS) ? len : (int)strlen(s);
-    if (n > UI_COLS) n = UI_COLS;
-    memcpy(buf, s, n);
-    buf[n] = '\0';
-    uint8_t col = _px2col(x);
-    uint8_t row = _py2row(y);
-    if (col < UI_COLS && row < UI_ROWS)
-        ui_print(col, row, PAL_NORMAL, buf);
-}
-
-__attribute__((used)) void GEN_WinEraseRectangle(const RectangleType* r, int corner)
-{
-    (void)corner;
-    uint8_t row0 = _py2row(r->topLeft.y);
-    uint8_t rows = _py2row(r->extent.y);
-    if (rows == 0) rows = 1;
-    for (uint8_t i = 0; i <= rows && row0 + i < UI_ROWS; i++)
-        ui_clear_row(row0 + i);
-}
-
-__attribute__((used)) void GEN_WinDrawLine(int x1, int y1, int x2, int y2)
-{
-    /* Not used for game logic; stub */
-    (void)x1; (void)y1; (void)x2; (void)y2;
-}
-
-__attribute__((used)) void GEN_WinFillRectangle(const RectangleType* r, int corner)
-{
-    (void)r; (void)corner;
-}
-
-__attribute__((used)) void GEN_WinDrawBitmap(BitmapPtr bmp, int x, int y)
-{
-    (void)bmp; (void)x; (void)y;
-}
-
-/* Event system – we synthesise events from joypad state */
-
-static EventType _queued_event;
-static int _has_queued_event = 0;
-
-__attribute__((used)) void GEN_EvtGetEvent(EventType* ep, int32_t timeout)
-{
-    (void)timeout;
-    ui_vsync();
-    memset(ep, 0, sizeof(*ep));
-
-    /* Drain injected event queue first */
-    if (_has_queued_event)
-    {
-        *ep = _queued_event;
-        _has_queued_event = 0;
-        return;
-    }
-
-    if (_pending_form_open)
-    {
-        kprintf("EvtGetEvent: delivering frmOpenEvent for form %d", ui_current_form);
-        ep->eType          = frmOpenEvent;
-        ep->data.frmOpen.formID = ui_current_form;
-        _pending_form_open = 0;
-        return;
-    }
-
-    /* ── Form-specific joypad → event mapping ───────────────────── */
-    if (ui_joy_pressed)
-    {
-        int      ctl       = 0;
-        uint16_t kdown_chr = 0;
-
-        switch (ui_current_form)
-        {
-            /* New Commander: Up/Down cycles field, Left/Right changes value */
-            case NewCommanderForm:
-            {
-                static int nc_field = 1; /* 0=Diff 1=Pilot 2=Fighter 3=Trader 4=Eng */
-                static const int nc_inc[] = {
-                    NewCommanderIncDifficultyButton,
-                    NewCommanderIncPilotButton,
-                    NewCommanderIncFighterButton,
-                    NewCommanderIncTraderButton,
-                    NewCommanderIncEngineerButton
-                };
-                static const int nc_dec[] = {
-                    NewCommanderDecDifficultyButton,
-                    NewCommanderDecPilotButton,
-                    NewCommanderDecFighterButton,
-                    NewCommanderDecTraderButton,
-                    NewCommanderDecEngineerButton
-                };
-                static const char* nc_labels[] =
-                    {"Difficulty","Pilot","Fighter","Trader","Engineer"};
-                if      (ui_joy_pressed & BTN_A)     ctl = NewCommanderOKButton;
-                else if (ui_joy_pressed & BTN_UP)    { if (nc_field > 0) nc_field--; }
-                else if (ui_joy_pressed & BTN_DOWN)  { if (nc_field < 4) nc_field++; }
-                else if (ui_joy_pressed & BTN_RIGHT) ctl = nc_inc[nc_field];
-                else if (ui_joy_pressed & BTN_LEFT)  ctl = nc_dec[nc_field];
-                if (!ctl) {
-                    char cur[40];
-                    snprintf(cur, sizeof(cur), "%-12s  LR=change  A=OK",
-                             nc_labels[nc_field]);
-                    ui_status(cur);
-                }
-                kprintf("NewCommander joypad: joy=%04X nc_field=%d ctl=%d",
-                     (int)ui_joy_pressed, nc_field, ctl);
-                break;
-            }
-
-            /* System Information – main docked screen */
-            case SystemInformationForm:
-                if      (ui_joy_pressed & BTN_A)     kdown_chr = 'w';
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_C)     kdown_chr = 's';
-                else if (ui_joy_pressed & BTN_START) kdown_chr = 'y';
-                else if (ui_joy_pressed & BTN_UP)    ctl = SystemInformationSpecialButton;
-                else if (ui_joy_pressed & BTN_DOWN)  ctl = SystemInformationNewsButton;
-                break;
-
-            case WarpForm:
-            case GalacticChartForm:
-                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                else if (ui_joy_pressed & BTN_START) kdown_chr = 'y';
-                break;
-
-            case ExecuteWarpForm:
-                if      (ui_joy_pressed & BTN_A)     ctl = ExecuteWarpWarpButton;
-                else if (ui_joy_pressed & BTN_B)     ctl = ExecuteWarpChartButton;
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                break;
-
-            case EncounterForm:
-                if      (ui_joy_pressed & BTN_A)     ctl = EncounterAttackButton;
-                else if (ui_joy_pressed & BTN_B)     ctl = EncounterFleeButton;
-                else if (ui_joy_pressed & BTN_C)     ctl = EncounterIgnoreButton;
-                else if (ui_joy_pressed & BTN_START) ctl = EncounterInterruptButton;
-                break;
-
-            case BuyCargoForm:
-                if      (ui_joy_pressed & BTN_A)     ctl = BuyCargoQty0Button;
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                else if (ui_joy_pressed & BTN_START) kdown_chr = 'y';
-                break;
-
-            case SellCargoForm:
-                if      (ui_joy_pressed & BTN_A)     ctl = SellCargoQty0Button;
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                else if (ui_joy_pressed & BTN_START) kdown_chr = 'y';
-                break;
-
-            case ShipYardForm:
-                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                break;
-
-            case BuyShipForm:
-                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                break;
-
-            case BuyEquipmentForm:
-                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                break;
-
-            case SellEquipmentForm:
-                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                break;
-
-            case CommanderStatusForm:
-            case CurrentShipForm:
-            case QuestsForm:
-                if      (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                break;
-
-            case BankForm:
-                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                break;
-
-            case PersonnelRosterForm:
-                if      (ui_joy_pressed & BTN_A)     kdown_chr = chrReturn;
-                else if (ui_joy_pressed & BTN_B)     kdown_chr = 'b';
-                else if (ui_joy_pressed & BTN_UP)    kdown_chr = chrPageUp;
-                else if (ui_joy_pressed & BTN_DOWN)  kdown_chr = chrPageDown;
-                break;
-
-            case SpecialEventForm:
-            case SpecialCargoForm:
-                if (ui_joy_pressed & BTN_A) kdown_chr = chrReturn;
-                break;
-
-            default:
-                break;
-        }
-
-        if (ctl != 0) {
-            kprintf("EvtGet: ctlSelect ctl=%d form=%d", ctl, (int)ui_current_form);
-            ep->eType = ctlSelectEvent;
-            ep->data.ctlSelect.controlID = (uint16_t)ctl;
-            return;
-        }
-        if (kdown_chr != 0) {
-            kprintf("EvtGet: keyDown chr=0x%04X form=%d", (int)kdown_chr, (int)ui_current_form);
-            ep->eType = keyDownEvent;
-            ep->data.keyDown.chr = kdown_chr;
-            return;
-        }
-    }
-
-    /* Generic fallback */
-    if (ui_joy_pressed & BTN_UP)
-    { ep->eType = keyDownEvent; ep->data.keyDown.chr = chrUpArrow; return; }
-    if (ui_joy_pressed & BTN_DOWN)
-    { ep->eType = keyDownEvent; ep->data.keyDown.chr = chrDownArrow; return; }
-    if (ui_joy_pressed & BTN_A)
-    { ep->eType = keyDownEvent; ep->data.keyDown.chr = chrReturn; return; }
-    if (ui_joy_pressed & BTN_B)
-    { ep->eType = keyDownEvent; ep->data.keyDown.chr = 0x1B; return; }
-    if (ui_joy_pressed & BTN_LEFT)
-    { ep->eType = keyDownEvent; ep->data.keyDown.chr = chrPageUp; return; }
-    if (ui_joy_pressed & BTN_RIGHT)
-    { ep->eType = keyDownEvent; ep->data.keyDown.chr = chrPageDown; return; }
-
-    /* Log non-nil events for debugging */
-    if (ep->eType != nilEvent)
-        kprintf("EvtGet: eType=%d form=%d", (int)ep->eType, (int)ui_current_form);
-    ep->eType = nilEvent;
-}
-
-uint32_t GEN_KeyCurrentState(void)
-{
-    return ui_joy_held;
-}
-
-/* Random number – SGDK doesn't have rand(); use our own LCG */
-static uint32_t _rng_state = 12345;
-__attribute__((used)) int32_t GEN_SysRandom(int32_t seed)
-{
-    if (seed) _rng_state = (uint32_t)seed;
-    _rng_state = _rng_state * 1664525UL + 1013904223UL;
-    return (int32_t)(_rng_state >> 1);
-}
-
-__attribute__((used)) uint32_t GEN_TimGetTicks(void)
-{
-    return ui_frame_count;
-}
-
-/* Memory – static pool (genesis has 64KB RAM; we reserve 8KB for allocs) */
-static uint8_t _mem_pool[8192];
-static uint16_t _mem_top = 0;
-
-__attribute__((used)) void* PalmMem_Alloc(uint16_t size)
-{
-    /* Bump allocator – we never free in this port */
-    size = (size + 1) & ~1;  /* align to 2 bytes */
-    if (_mem_top + size > sizeof(_mem_pool)) return NULL;
-    void* p = &_mem_pool[_mem_top];
-    _mem_top += size;
-    memset(p, 0, size);
-    return p;
-}
-
-void PalmMem_Free(void* p)
-{
-    (void)p;  /* no-op; bump allocator */
-}
-
-/* -----------------------------------------------------------------------
- * Full SAVEGAMETYPE SRAM serialization
- * The SAVEGAMETYPE struct is large (~700 bytes).  Genesis SRAM is 8KB on
- * most carts.  We write the magic word first, then the raw struct.
- * --------------------------------------------------------------------- */
-/* SAVEGAMETYPE available via external.h -> spacetrader.h -> DataTypes.h */
-
-#define SRAM_FULL_MAGIC  0xC0DE
-#define SRAM_FULL_OFFSET 0
 
 __attribute__((used)) void sram_save_full(SAVEGAMETYPE* sg)
 {
-    uint16_t magic = SRAM_FULL_MAGIC;
+    u16 m = SRAM_MAGIC;
     SRAM_enable();
-    SRAM_writeBuffer(&magic, SRAM_FULL_OFFSET, sizeof(magic));
-    SRAM_writeBuffer(sg, SRAM_FULL_OFFSET + sizeof(magic), sizeof(SAVEGAMETYPE));
+    SRAM_writeBuffer(&m, SRAM_MAGIC_OFF, sizeof(m));
+    SRAM_writeBuffer(sg, SRAM_DATA_OFF, sizeof(SAVEGAMETYPE));
     SRAM_disable();
 }
 
 __attribute__((used)) void sram_load_full(SAVEGAMETYPE* sg)
 {
     SRAM_enable();
-    SRAM_readBuffer(sg, SRAM_FULL_OFFSET + sizeof(uint16_t), sizeof(SAVEGAMETYPE));
+    SRAM_readBuffer(sg, SRAM_DATA_OFF, sizeof(SAVEGAMETYPE));
     SRAM_disable();
 }
 
-__attribute__((used)) Boolean sram_has_save(void)
+/* =========================================================================
+ * §7  Alert text table
+ *
+ * Every Palm alert ID mapped to a message string and yes/no flag.
+ * Yes/no alerts return 0 for the affirmative button (matching Palm).
+ * ====================================================================== */
+typedef struct { int id; const char* msg; u8 yn; } AE;
+
+static const AE _atbl[] = {
+    /* info-only (yn=0) */
+    {1100,"Start a new game? (Current game will be lost)",1},
+    {1200,"You still have skill points to spend.",0},
+    {1300,"Nothing available here.",0},
+    {1400,"You can't afford that.",0},
+    {1500,"No empty cargo bays.",0},
+    {1600,"Nothing for sale here.",0},
+    {1700,"They're not interested.",0},
+    {1800,"Too many crew members.",0},
+    {1900,"You can't buy that ship.",0},
+    {2000,"That ship is not available here.",0},
+    {2100,"You can't buy that item.",0},
+    {2200,"Not enough equipment slots.",0},
+    {2300,"No more of that item.",0},
+    {2400,"That item is not sold here.",0},
+    {2500,"Cargo bays are full.",0},
+    {2600,"No free crew quarters.",0},
+    {2700,"Not enough funds for this event.",0},
+    {2800,"You must pay your mercenaries first.",0},
+    {2900,"Tribbles ate your food!",0},
+    {3000,"You have a tribble on board!",0},
+    {3100,"You beamed over the tribbles.",0},
+    {3200,"Your skill increased!",0},
+    {3300,"Your police record is clean.",0},
+    {3400,"You're in debt!",0},
+    {3500,"Your debt is too high for a new loan.",0},
+    {3600,"You have no debt.",0},
+    {3700,"An uneventful trip.",0},
+    {3800,"You have arrived safely.",0},
+    {3900,"No illegal goods found — clean bill.",0},
+    {4000,"The police cannot be bribed here.",0},
+    {4100,"Not enough credits for the bribe.",0},
+    {4200,"Pirates plunder your cargo!",0},
+    {4300,"Pirates find no cargo. They demand a cash blackmail.",0},
+    {4400,"Both ships are destroyed!",0},
+    {4500,"Your opponent is destroyed!",0},
+    {4600,"Your ship has been destroyed!",0},
+    {4700,"You escaped!",0},
+    {4800,"Your opponent escaped!",0},
+    {5000,"Not enough cargo bays for that.",0},
+    {5100,"You found an antidote!",0},
+    {5200,"Lightning shield activated!",0},
+    {5300,"Sealed cannisters protect your cargo.",0},
+    {5400,"The victim doesn't have any of that.",0},
+    {5500,"You escaped, but with damage.",0},
+    {5600,"You can't afford a full fuel load.",0},
+    {5700,"You can't afford full repairs.",0},
+    {5800,"You can't afford full fuel or repairs.",0},
+    {6200,"You have no weapons!",0},
+    {6400,"Escape pod activated — you survive!",0},
+    {6500,"A Flea was built for you.",0},
+    {6600,"Insurance pays for your new ship.",0},
+    {6700,"A tribble survived in the escape pod.",0},
+    {6800,"The antidote was destroyed.",0},
+    {6900,"You need an escape pod to get insurance.",0},
+    {7200,"Outdated software — update needed.",0},
+    {7300,"No room to scoop fuel.",0},
+    {7900,"Squeek!",0},
+    {8000,"Tribbles ate your narcotics!",0},
+    {8100,"You bought a moon! Congratulations!",0},
+    {8200,"The aliens stole the artifact.",0},
+    {8300,"Artifact not saved.",0},
+    {8400,"Your ship is not worth much.",0},
+    {8700,"Surrender not accepted.",0},
+    {8900,"You have been arrested!",0},
+    {9000,"Antidote removed.",0},
+    {9200,"Flea received.",0},
+    {9300,"You were impounded.",0},
+    {9400,"Insurance lost.",0},
+    {9600,"You retired.",0},
+    {9800,"Morgan Laser installed.",0},
+    {9900,"Reactor installed.",0},
+    {10000,"Reactor delivered.",0},
+    {10100,"Reactor destroyed.",0},
+    {10300,"Training completed!",0},
+    {10400,"Fuel compactor transferred.",0},
+    {10500,"Lightning shield transferred.",0},
+    {10600,"Morgan Laser transferred.",0},
+    {10700,"Can't sell ship — it has a reactor on board.",0},
+    {11100,"Orbit trade completed.",0},
+    {11200,"The Customs Police cannot be bribed.",0},
+    {12000,"The Experiment has been performed!",0},
+    {12200,"That was a good drink!",0},
+    {12300,"That was a strange drink...",0},
+    {12400,"Loan amount received.",0},
+    {12700,"Debug message.",0},
+    {12800,"Nothing to dump.",0},
+    {12900,"Jonathan Wild has been arrested!",0},
+    {13000,"You got a Morgan Laser!",0},
+    {13100,"Morgan Laser transferred.",0},
+    {13200,"Wild boarded the pirate ship.",0},
+    {13300,"Wild stays aboard — no room on pirate ship.",0},
+    {13500,"Wild has left your ship.",0},
+    {13600,"The reactor is consuming fuel cells.",0},
+    {13700,"Reactor meltdown! Your ship is destroyed.",0},
+    {13800,"Warning: reactor condition deteriorating.",0},
+    {13900,"The reactor is making unusual noises.",0},
+    {14000,"The reactor is smoking!",0},
+    {14100,"The reactor has been destroyed.",0},
+    {14200,"Pirates are puzzled by the reactor.",0},
+    {14300,"Police confiscate the reactor.",0},
+    {14400,"Wild won't get aboard.",0},
+    {14500,"Can't transfer — slot occupied.",0},
+    {14700,"Can't transfer that item.",0},
+    {14800,"Tribbles on board!",0},
+    {14900,"Can't sell ship with reactor on board.",0},
+    {15000,"Tribbles irradiated.",0},
+    {15100,"All tribbles irradiated.",0},
+    {15200,"Wild is afraid of the reactor!",0},
+    {15300,"Wild won't stay on board with the reactor.",0},
+    {15600,"You yield the narcotics.",0},
+    {15700,"Hull upgrade installed!",0},
+    {15800,"No system selected.",0},
+    {16000,"Can't dump and can't scoop.",0},
+    {16100,"General message.",0},
+    {16200,"Cannot save game.",0},
+    {16300,"Cannot load game.",0},
+    {16600,"Game saved.",0},
+    {16900,"Cannot switch games.",0},
+    {17000,"Game switched.",0},
+    {17500,"Can't jump to current system.",0},
+    /* yes/no (yn=1, return 0=affirmative matches Palm) */
+    {4900, "Retire and end your career?",1},
+    {6000, "Clear the high score table?",1},
+    {6300, "Buy an escape pod?",1},
+    {7000, "Stop your insurance? Your no-claim will reset to 0%%.",1},
+    {7400, "Sell this item?",1},
+    {7500, "You aren't carrying illegal goods. Are you sure you want to flee or bribe?",1},
+    {7600, "Submit to inspection?",1},
+    {8500, "If you attack the police, you will be labeled a criminal. Are you sure?",1},
+    {8600, "Attacking a trader will make the police suspicious. Continue?",1},
+    {8800, "Do you really want to surrender?",1},
+    {9700, "The aliens only want the artifact. Surrender it?",1},
+    {10800,"Fire this crew member?",1},
+    {11000,"Flee the Customs Police? Your record will suffer.",1},
+    {11300,"Attack this famous captain?",1},
+    {11400,"Engage the Marie Celeste and take its cargo?",1},
+    {11500,"Trade your shield with Captain Ahab?",1},
+    {11700,"Trade your laser with Captain Conrad?",1},
+    {11800,"Trade your laser with Captain Huie?",1},
+    {11900,"Drink the bottle?",1},
+    {12500,"Buy a newspaper?",1},
+    {13400,"Wild won't go to a system with police. Say goodbye to Wild?",1},
+    {14600,"Trade in your ship?",1},
+    {15400,"Track this system on the galactic chart?",1},
+    {15500,"Dump all cargo?",1},
+    {15900,"Use the Singularity Device?",1},
+    {16400,"Really load this save? Unsaved progress will be lost.",1},
+    {16500,"Disable scoring for this game?",1},
+    {16700,"This might affect your record. Continue?",1},
+    {16800,"Switch to another game?",1},
+    {0,NULL,0}
+};
+
+static const AE* _find_alert(int id)
 {
-    uint16_t magic = 0;
-    SRAM_enable();
-    SRAM_readBuffer(&magic, SRAM_FULL_OFFSET, sizeof(magic));
-    SRAM_disable();
-    return magic == SRAM_FULL_MAGIC;
-}
-
-/* -----------------------------------------------------------------------
- * Additional Palm OS stubs needed by Draw.c / Cargo.c / AppHandleEvent.c
- * --------------------------------------------------------------------- */
-
-/* Label storage: we keep a small table of (labelID -> string) pairs */
-#define MAX_LABELS 64
-static struct { int id; char text[64]; } _label_table[MAX_LABELS];
-static int _label_count = 0;
-
-static char* _label_find(int id)
-{
-    for (int i = 0; i < _label_count; i++)
-        if (_label_table[i].id == id) return _label_table[i].text;
+    const AE* a;
+    for (a = _atbl; a->id; a++)
+        if (a->id == id) return a;
     return NULL;
 }
-static char* _label_get_or_create(int id)
+
+int ui_alert_id(int alertID)
 {
-    char* p = _label_find(id);
-    if (p) return p;
-    if (_label_count >= MAX_LABELS) return _label_table[0].text;
-    _label_table[_label_count].id = id;
-    _label_table[_label_count].text[0] = '\0';
-    return _label_table[_label_count++].text;
+    const AE* a = _find_alert(alertID);
+    if (a && a->yn) return ui_confirm(a->msg) ? 0 : 1;
+    ui_alert(a ? a->msg : "OK");
+    return 0;
 }
 
-__attribute__((used)) void GEN_FrmCopyLabel(FormPtr frm, int labelID, const char* s)
+int ui_custom_alert(int alertID, const char* s1, const char* s2, const char* s3)
 {
+    char body[160];
+    const AE* a = _find_alert(alertID);
+    int yn = a ? a->yn : 0;
+    (void)s3;
+    snprintf(body, sizeof(body), "%s", a ? a->msg : "Notice");
+    if (s1 && s1[0] && s1[0] != ' ')
+        snprintf(body + strlen(body), sizeof(body) - strlen(body), "\n%s", s1);
+    if (s2 && s2[0] && s2[0] != ' ')
+        snprintf(body + strlen(body), sizeof(body) - strlen(body), "\n%s", s2);
+    if (yn) return ui_confirm(body) ? 0 : 1;
+    ui_alert(body);
+    return 0;
+}
+
+/* =========================================================================
+ * §8  Palm form stubs
+ * ====================================================================== */
+#define MAX_HANDLERS 32
+static struct { int id; FormEventHandlerType* fn; } _hndl[MAX_HANDLERS];
+static int _hndl_n;
+static int _pending_open;
+
+__attribute__((used)) void GEN_FrmGotoForm(int formID)
+{
+    EventType ev;
+    kprintf("GEN_FrmGotoForm: %d", formID);
+    ui_current_form = formID;
+    memset(&ev, 0, sizeof(ev));
+    ev.eType = frmLoadEvent;
+    ev.data.frmLoad.formID = (u16)formID;
+    AppHandleEvent(&ev);
+    _pending_open = 1;
+}
+
+__attribute__((used)) int     GEN_FrmGetActiveFormID(void) { return ui_current_form; }
+__attribute__((used)) FormPtr GEN_FrmGetActiveForm(void)   { return (FormPtr)(intptr_t)ui_current_form; }
+
+__attribute__((used)) void GEN_FrmSetEventHandler(FormPtr frm, void* fn)
+{
+    int id = (int)(intptr_t)frm, i;
+    for (i = 0; i < _hndl_n; i++)
+        if (_hndl[i].id == id) { _hndl[i].fn = (FormEventHandlerType*)fn; return; }
+    if (_hndl_n < MAX_HANDLERS) {
+        _hndl[_hndl_n].id = id;
+        _hndl[_hndl_n].fn = (FormEventHandlerType*)fn;
+        _hndl_n++;
+    }
+}
+
+__attribute__((used)) Boolean GEN_FrmDispatchEvent(EventType* ep)
+{
+    int i;
+    for (i = 0; i < _hndl_n; i++)
+        if (_hndl[i].id == ui_current_form && _hndl[i].fn)
+            return _hndl[i].fn(ep);
+    return false;
+}
+
+/* =========================================================================
+ * §9  Label / field / control storage
+ * ====================================================================== */
+#define MAX_LABELS 64
+static struct { int id; char text[64]; } _lbl[MAX_LABELS];
+static int _lbl_n;
+
+static char* _lbl_slot(int id)
+{
+    int i;
+    for (i = 0; i < _lbl_n; i++) if (_lbl[i].id == id) return _lbl[i].text;
+    if (_lbl_n < MAX_LABELS) {
+        _lbl[_lbl_n].id = id; _lbl[_lbl_n].text[0] = '\0';
+        return _lbl[_lbl_n++].text;
+    }
+    return _lbl[0].text;
+}
+
+/* Collect all non-empty labels into one \n-separated buffer */
+static void _lbl_body(char* buf, int sz)
+{
+    int i, j = 0;
+    for (i = 0; i < _lbl_n && j < sz - 2; i++) {
+        int l = (int)strlen(_lbl[i].text);
+        if (!l) continue;
+        if (j + l >= sz - 2) break;
+        memcpy(buf + j, _lbl[i].text, (unsigned)l);
+        j += l;
+        buf[j++] = '\n'; buf[j] = '\0';
+    }
+    if (!j) buf[0] = '\0';
+}
+
+__attribute__((used)) void GEN_FrmCopyLabel(FormPtr frm, int id, const char* s)
+{
+    char* p = _lbl_slot(id);
     (void)frm;
-    char* buf = _label_get_or_create(labelID);
-    strncpy(buf, s, 63);
-    buf[63] = '\0';
+    strncpy(p, s, 63); p[63] = '\0';
 }
 
-/* Control labels */
-#define MAX_CTL_LABELS 32
-static struct { void* ptr; char text[32]; } _ctl_labels[MAX_CTL_LABELS];
-static int _ctl_label_count = 0;
+#define MAX_CTL 32
+static struct { void* ptr; char text[32]; } _ctl[MAX_CTL];
+static int _ctl_n;
 
 __attribute__((used)) void GEN_CtlSetLabel(void* cp, const char* s)
 {
-    for (int i = 0; i < _ctl_label_count; i++) {
-        if (_ctl_labels[i].ptr == cp) {
-            strncpy(_ctl_labels[i].text, s, 31);
-            return;
-        }
-    }
-    if (_ctl_label_count < MAX_CTL_LABELS) {
-        _ctl_labels[_ctl_label_count].ptr = cp;
-        strncpy(_ctl_labels[_ctl_label_count].text, s, 31);
-        _ctl_label_count++;
+    int i;
+    for (i = 0; i < _ctl_n; i++)
+        if (_ctl[i].ptr == cp) { strncpy(_ctl[i].text, s, 31); _ctl[i].text[31]='\0'; return; }
+    if (_ctl_n < MAX_CTL) {
+        _ctl[_ctl_n].ptr = cp; strncpy(_ctl[_ctl_n].text, s, 31); _ctl[_ctl_n].text[31]='\0'; _ctl_n++;
     }
 }
+
 __attribute__((used)) const char* GEN_CtlGetLabel(void* cp)
 {
-    for (int i = 0; i < _ctl_label_count; i++)
-        if (_ctl_labels[i].ptr == cp) return _ctl_labels[i].text;
+    int i;
+    for (i = 0; i < _ctl_n; i++) if (_ctl[i].ptr == cp) return _ctl[i].text;
     return "";
 }
 
-/* FrmDoDialog – runs our Genesis yes/no dialog.
- * Returns a "yes"-flavoured button ID (we use a large sentinel value that
- * won't collide with real "No" button IDs, since callers compare against
- * specific constants like BuyItemYesButton).
- * 
- * Strategy: we show the last-set label text as the question, and return
- * the "Yes/OK" button constant for that form if the user presses A,
- * or the "No/Cancel" constant if B.
+/* =========================================================================
+ * §10  Quantity spinner
  *
- * The formID is embedded as the intptr_t of the FormPtr.
- * We delegate to ui_yesno() for forms that ask yes/no questions.
- * For display-only forms (FinalScoreForm etc.) we just wait for A.
- */
-/* MerchantRsc.h already included via external.h */
+ * Shows any label text already set, then lets the player adjust a number
+ * with L/R (fine) and Up/Dn (max/zero).  A=confirm, B=cancel (-1).
+ * The chosen value is written into ui_field_buf AND SBuf so callers
+ * that use GetField() or SBuf directly both get it.
+ * ====================================================================== */
+static int _qty_dialog(const char* title, int max_qty)
+{
+    int qty = 0;
+    char ctx[192];
+    u8  qty_row;
 
-__attribute__((used)) uint16_t GEN_FrmDoDialog(FormPtr frm)
+    _lbl_body(ctx, sizeof(ctx));
+
+    ui_clear_body();
+    ui_hline(UI_BODY_TOP);
+    ui_print(1, UI_BODY_TOP + 1, PAL_HILIGHT, title);
+    ui_hline(UI_BODY_TOP + 2);
+    qty_row = _wrap(ctx, UI_BODY_TOP + 3, PAL_NORMAL);
+    if (qty_row < (u8)(UI_BODY_BOT - 3)) qty_row = (u8)(UI_BODY_BOT - 3);
+
+    ui_printf(1, qty_row, PAL_HILIGHT, "Amount: %-6d  max %d", qty, max_qty);
+    ui_status("L/R=adjust  Up=max  Dn=0  A=OK  B=cancel");
+
+    for (;;) {
+        int ch = 0;
+        ui_vsync();
+        if (ui_joy_pressed & BTN_RIGHT) { if (qty < max_qty) { qty++; ch=1; } }
+        if (ui_joy_pressed & BTN_LEFT)  { if (qty > 0)       { qty--; ch=1; } }
+        if (ui_joy_pressed & BTN_UP)    { qty = max_qty; ch=1; }
+        if (ui_joy_pressed & BTN_DOWN)  { qty = 0;       ch=1; }
+        if (ch) ui_printf(1, qty_row, PAL_HILIGHT, "Amount: %-6d  max %d", qty, max_qty);
+        if (ui_joy_pressed & BTN_A) {
+            snprintf(ui_field_buf, sizeof(ui_field_buf), "%d", qty);
+            snprintf(SBuf, 8, "%d", qty);
+            return qty;
+        }
+        if (ui_joy_pressed & BTN_B) {
+            ui_field_buf[0] = '\0'; SBuf[0] = '\0';
+            return -1;
+        }
+    }
+}
+
+/* =========================================================================
+ * §11  GEN_FrmDoDialog
+ *
+ * Every modal form the game creates goes through here.
+ * Return value must be the Palm button-ID constant the caller checks.
+ * ====================================================================== */
+__attribute__((used)) u16 GEN_FrmDoDialog(FormPtr frm)
 {
     int formID = (int)(intptr_t)frm;
-    char title[UI_COLS + 1];
-    char body[UI_COLS * 4 + 1];
+    char body[256];
+    int  result;
 
-    /* Build dialog body from label table entries set for this form */
-    snprintf(title, sizeof(title), "Form %d", formID);
-    body[0] = '\0';
+    /* NOTE: do NOT call _lbl_body / clear labels here at entry.
+     * The game calls setLabelText() between FrmInitForm and FrmDoDialog,
+     * so _lbl[] is already populated when we arrive. */
 
-    /* For well-known forms, show meaningful text */
-    switch (formID)
-    {
-        case BuyItemForm:
-            snprintf(title, sizeof(title), "Buy Equipment");
-            break;
-        case GetLoanForm:
-            snprintf(title, sizeof(title), "Get Loan");
-            break;
-        case PayBackForm:
-            snprintf(title, sizeof(title), "Pay Back Loan");
-            break;
-        case TradeInShipForm:
-            snprintf(title, sizeof(title), "Trade In Ship");
-            break;
-        case AmountToSellForm:
-        case AmountToBuyForm:
-        case AmountToPlunderForm:
-            snprintf(title, sizeof(title), "Enter Amount");
-            break;
-        case DumpCargoForm:
-            snprintf(title, sizeof(title), "Dump Cargo");
-            break;
-        case BribeForm:
-            snprintf(title, sizeof(title), "Bribe");
-            break;
-        case TradeInOrbitForm:
-            snprintf(title, sizeof(title), "Trade in Orbit");
-            break;
-        case IllegalGoodsForm:
-            snprintf(title, sizeof(title), "Illegal Goods");
-            break;
-        case PickCannisterForm:
-            snprintf(title, sizeof(title), "Pick Cannister");
-            break;
-        case ConvictionForm:
-            snprintf(title, sizeof(title), "Conviction");
-            break;
-        case BountyForm:
-            snprintf(title, sizeof(title), "Bounty");
-            break;
-        case FinalScoreForm:
-        case HighScoresForm:
-            snprintf(title, sizeof(title), "High Score");
-            break;
-        default:
-            break;
+    switch (formID) {
+
+    /* ── Cargo quantity spinners ───────────────────────────────────────── */
+    case AmountToSellForm:
+        result = _qty_dialog("Sell: How Many?", 9999);
+        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
+        return (u16)(result < 0 ? AmountToSellNoneButton : AmountToSellOKButton);
+
+    case AmountToBuyForm:
+        result = _qty_dialog("Buy: How Many?", 9999);
+        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
+        return (u16)(result < 0 ? AmountToBuyNoneButton : AmountToBuyOKButton);
+
+    case AmountToPlunderForm:
+        result = _qty_dialog("Plunder: How Many?", 9999);
+        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
+        return (u16)(result < 0 ? AmountToPlunderNoneButton : AmountToPlunderOKButton);
+
+    case GetLoanForm:
+        result = _qty_dialog("Get Loan", 25000);
+        if (result < 0)      return GetLoanNothingButton;
+        if (result >= 25000) return GetLoanEverythingButton;
+        return GetLoanOKButton;
+
+    case PayBackForm:
+        result = _qty_dialog("Pay Back Loan", 99999);
+        if (result < 0)      return PayBackNothingButton;
+        if (result >= 99999) return PayBackEverythingButton;
+        return PayBackOKButton;
+
+    /* ── Fuel & repair spinners ────────────────────────────────────────── */
+    case BuyFuelForm:
+        result = _qty_dialog("Buy Fuel", 99);
+        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
+        if (result < 0)    return BuyFuelNoneButton;
+        if (result >= 99)  return BuyFuelAllButton;
+        return BuyFuelOKButton;
+
+    case BuyRepairsForm:
+        result = _qty_dialog("Buy Repairs", 9999);
+        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
+        if (result < 0)    return BuyRepairsNoneButton;
+        if (result >= 9999) return BuyRepairsAllButton;
+        return BuyRepairsOKButton;
+
+    /* ── Trade in orbit ────────────────────────────────────────────────── */
+    case TradeInOrbitForm:
+        result = _qty_dialog("Trade in Orbit", 9999);
+        if (result < 0)     return (u16)(formID + 2);
+        if (result >= 9999) return TradeInOrbitAllButton;
+        return TradeInOrbitOKButton;
+
+    /* ── Bribe ─────────────────────────────────────────────────────────── */
+    case BribeForm:
+        _lbl_body(body, sizeof(body));
+        result = ui_confirm(body[0] ? body : "Offer the bribe?");
+        return (u16)(result ? BribeOfferBribeButton : BribeForgetItButton);
+
+    /* ── Info-only notices ─────────────────────────────────────────────── */
+    case IllegalGoodsForm:
+        _lbl_body(body, sizeof(body));
+        ui_alert(body[0] ? body : "Illegal goods confiscated. You are fined.");
+        return (u16)(formID + 1);
+
+    case ConvictionForm:
+        _lbl_body(body, sizeof(body));
+        ui_alert(body[0] ? body : "You have been convicted.");
+        return (u16)(formID + 1);
+
+    case BountyForm:
+        _lbl_body(body, sizeof(body));
+        ui_alert(body[0] ? body : "Bounty received.");
+        return BountyOKButton;
+
+    case FinalScoreForm:
+        _lbl_body(body, sizeof(body));
+        ui_alert(body[0] ? body : "Game Over.");
+        return (u16)(formID + 1);
+
+    case HighScoresForm:
+        _lbl_body(body, sizeof(body));
+        ui_alert(body[0] ? body : "High Scores.");
+        return (u16)(formID + 1);
+
+    /* ── Buy/sell equipment yes/no ─────────────────────────────────────── */
+    case BuyItemForm:
+        _lbl_body(body, sizeof(body));
+        result = ui_confirm(body[0] ? body : "Buy this item?");
+        return (u16)(result ? BuyItemYesButton : BuyItemNoButton);
+
+    case TradeInShipForm:
+        _lbl_body(body, sizeof(body));
+        result = ui_confirm(body[0] ? body : "Trade in your ship?");
+        return (u16)(result ? TradeInShipYesButton : TradeInShipNoButton);
+
+    /* ── Pick up floating cannister ────────────────────────────────────── */
+    case PickCannisterForm:
+        _lbl_body(body, sizeof(body));
+        result = ui_confirm(body[0] ? body : "Pick up the cannister?");
+        return (u16)(result ? PickCannisterPickItUpButton : PickCannisterLetItGoButton);
+
+    /* ── Dump cargo (inline discard screen) ───────────────────────────── */
+    case DumpCargoForm: {
+        /* Run a self-contained dump screen.
+         * Game code already called FrmSetEventHandler(frm, DiscardCargoFormHandleEvent)
+         * before FrmDoDialog, so the handler is registered in _hndl[]. */
+        EventType ev;
+        int saved_form = ui_current_form;
+        ui_current_form = DumpCargoForm;
+
+        /* Deliver open */
+        memset(&ev, 0, sizeof(ev));
+        ev.eType = frmOpenEvent;
+        ev.data.frmOpen.formID = DumpCargoForm;
+        GEN_FrmDispatchEvent(&ev);
+
+        /* Input loop: B=done, everything else → dispatch as ctlSelect */
+        ui_clear_body();
+        ui_title("DUMP CARGO");
+        {
+            int i;
+            for (i = 0; i < MAXTRADEITEM; i++) {
+                if (Ship.Cargo[i] > 0)
+                    ui_printf(0, UI_BODY_TOP + i, PAL_NORMAL,
+                        "%-12s  x%d", Tradeitem[i].Name, Ship.Cargo[i]);
+                else
+                    ui_printf(0, UI_BODY_TOP + i, PAL_DIM,
+                        "%-12s  ---", Tradeitem[i].Name);
+            }
+        }
+        ui_status("UP/DN=item  A=dump all  B=done");
+        {
+            int sel = 0;
+            for (;;) {
+                ui_vsync();
+                if (ui_joy_pressed & BTN_DOWN) {
+                    if (sel < MAXTRADEITEM-1) sel++;
+                    ui_printf(0, UI_BODY_TOP + sel, PAL_HILIGHT,
+                        "%-12s  x%d  <", Tradeitem[sel].Name, Ship.Cargo[sel]);
+                }
+                if (ui_joy_pressed & BTN_UP) {
+                    if (sel > 0) sel--;
+                    ui_printf(0, UI_BODY_TOP + sel, PAL_HILIGHT,
+                        "%-12s  x%d  <", Tradeitem[sel].Name, Ship.Cargo[sel]);
+                }
+                if (ui_joy_pressed & BTN_A) {
+                    memset(&ev, 0, sizeof(ev));
+                    ev.eType = ctlSelectEvent;
+                    ev.data.ctlSelect.controlID = (u16)(SellCargoDump0Button + sel);
+                    GEN_FrmDispatchEvent(&ev);
+                    /* Redraw after dump */
+                    {
+                        int i;
+                        for (i = 0; i < MAXTRADEITEM; i++) {
+                            int p = (i == sel) ? PAL_HILIGHT : (Ship.Cargo[i] > 0 ? PAL_NORMAL : PAL_DIM);
+                            if (Ship.Cargo[i] > 0)
+                                ui_printf(0, UI_BODY_TOP + i, p,
+                                    "%-12s  x%d  ", Tradeitem[i].Name, Ship.Cargo[i]);
+                            else
+                                ui_printf(0, UI_BODY_TOP + i, PAL_DIM,
+                                    "%-12s  ---  ", Tradeitem[i].Name);
+                        }
+                    }
+                }
+                if (ui_joy_pressed & BTN_B) break;
+            }
+        }
+        ui_current_form = saved_form;
+        return (u16)(DumpCargoForm + 1);
     }
 
-    /* For quantity-entry forms, use ui_textinput or ui_spinner */
-    if (formID == AmountToSellForm || formID == AmountToBuyForm ||
-        formID == AmountToPlunderForm)
-    {
-        /* Quantity input – use spinner 0..999 */
-        UISpinner sp;
+    /* ── Find system by name ───────────────────────────────────────────── */
+    case FindSystemForm: {
+        extern char FindSystem[];
+        int sel = 0, top = 0, vis = 10, n = MAXSOLARSYSTEM, i;
+
         ui_clear_body();
-        ui_title(title);
+        ui_title("FIND SYSTEM");
+        ui_status("UP/DN=scroll  A=select  B=cancel");
 
-        /* Show relevant labels from table */
-        uint8_t row = UI_BODY_TOP + 1;
-        for (int i = 0; i < _label_count && row < UI_BODY_BOT - 4; i++) {
-            ui_printf(0, row++, PAL_NORMAL, "%s", _label_table[i].text);
+        /* Initial draw */
+        for (i = 0; i < vis && i < n; i++) {
+            int pal = (i == sel) ? PAL_HILIGHT : PAL_NORMAL;
+            ui_printf(0, UI_BODY_TOP + i, pal, "%-20s",
+                SolarSystemName[SolarSystem[i].NameIndex]);
         }
-
-        ui_spinner_init(&sp, 0, 0, 999, 1,
-                        UI_BODY_BOT - 3, 16, 6);
-        ui_spinner_draw(&sp);
-        ui_status("LEFT/RIGHT=qty  A=OK  B=Cancel");
 
         for (;;) {
             ui_vsync();
-            if (ui_spinner_update(&sp)) {
-                /* Store result in SBuf so GetField() can read it */
-                extern char SBuf[];
-                snprintf(SBuf, 8, "%d", (int)sp.value);
-                ui_field_buf[0] = '\0';
-                snprintf(ui_field_buf, sizeof(ui_field_buf), "%d", (int)sp.value);
-                return (uint16_t)(formID + 1); /* "OK" button = formID+1 convention */
+            if (ui_joy_pressed & BTN_DOWN && sel < n-1) {
+                sel++;
+                if (sel >= top + vis) top++;
+                for (i = 0; i < vis && (top+i) < n; i++) {
+                    int pal = (top+i == sel) ? PAL_HILIGHT : PAL_NORMAL;
+                    ui_printf(0, UI_BODY_TOP + i, pal, "%-20s",
+                        SolarSystemName[SolarSystem[top+i].NameIndex]);
+                }
+            }
+            if (ui_joy_pressed & BTN_UP && sel > 0) {
+                sel--;
+                if (sel < top) top--;
+                for (i = 0; i < vis && (top+i) < n; i++) {
+                    int pal = (top+i == sel) ? PAL_HILIGHT : PAL_NORMAL;
+                    ui_printf(0, UI_BODY_TOP + i, pal, "%-20s",
+                        SolarSystemName[SolarSystem[top+i].NameIndex]);
+                }
+            }
+            if (ui_joy_pressed & BTN_A) {
+                strncpy(FindSystem,
+                    SolarSystemName[SolarSystem[sel].NameIndex], NAMELEN);
+                FindSystem[NAMELEN] = '\0';
+                strncpy(SBuf, FindSystem, 7); SBuf[7] = '\0';
+                strncpy(ui_field_buf, FindSystem, sizeof(ui_field_buf)-1);
+                return FindSystemOKButton;
             }
             if (ui_joy_pressed & BTN_B) {
-                extern char SBuf[];
-                SBuf[0] = '\0';
-                ui_field_buf[0] = '\0';
-                return (uint16_t)(formID + 2); /* "Cancel" */
+                ui_field_buf[0] = '\0'; SBuf[0] = '\0';
+                return FindSystemCancelButton;
             }
         }
     }
 
-    /* For yes/no confirmation forms */
-    Boolean result = ui_msgbox(title,
-        body[0] ? body : "Confirm?",
-        true);
+    /* ── Options (gameplay toggles) ────────────────────────────────────── */
+    case OptionsForm: {
+        static const struct { int id; const char* lbl; } opts[] = {
+            {OptionsAutoFuelCheckbox,            "Auto-fuel"},
+            {OptionsAutoRepairCheckbox,          "Auto-repair"},
+            {OptionsReserveMoneyCheckbox,        "Reserve money"},
+            {OptionsAlwaysInfoCheckbox,          "Always show info"},
+            {OptionsContinuousCheckbox,          "Continuous combat"},
+            {OptionsAttackFleeingCheckbox,       "Attack fleeing"},
+            {OptionsAlwaysIgnorePoliceCheckbox,  "Ignore police"},
+            {OptionsAlwaysIgnorePiratesCheckbox, "Ignore pirates"},
+            {OptionsAlwaysIgnoreTradersCheckbox, "Ignore traders"},
+            {OptionsTradeInOrbitCheckbox,        "Trade in orbit"},
+            {0, NULL}
+        };
+        int cur = 0, n = 10, i;
 
-    /* Map result to button IDs the game logic expects */
-    switch (formID)
-    {
-        case BuyItemForm:
-            return result ? BuyItemYesButton : BuyItemNoButton;
-        case GetLoanForm:
-            return result ? GetLoanEverythingButton : GetLoanNothingButton;
-        case PayBackForm:
-            return result ? PayBackEverythingButton : PayBackNothingButton;
-        case TradeInShipForm:
-            return result ? TradeInShipYesButton : TradeInShipNoButton;
-        default:
-            /* Generic: return form-scoped OK/Cancel pair */
-            return result ? (uint16_t)(formID + 1) : (uint16_t)(formID + 2);
+        #define DRAW_OPTS() do { \
+            ui_clear_body(); ui_title("OPTIONS"); \
+            for (i = 0; opts[i].id; i++) { \
+                int v = GEN_CtlGetValue(opts[i].id); \
+                int p = (i == cur) ? PAL_HILIGHT : PAL_NORMAL; \
+                ui_printf(0, UI_BODY_TOP+i, p, "[%c] %s", v ? 'X' : ' ', opts[i].lbl); \
+            } \
+            ui_status("UP/DN=move  A=toggle  B=done  St=more"); \
+        } while(0)
+
+        DRAW_OPTS();
+        for (;;) {
+            ui_vsync();
+            if (ui_joy_pressed & BTN_DOWN && cur < n-1) { cur++; DRAW_OPTS(); }
+            if (ui_joy_pressed & BTN_UP   && cur > 0)   { cur--; DRAW_OPTS(); }
+            if (ui_joy_pressed & BTN_A) {
+                GEN_CtlSetValue(opts[cur].id, GEN_CtlGetValue(opts[cur].id) ? 0 : 1);
+                DRAW_OPTS();
+            }
+            if (ui_joy_pressed & BTN_B)     return OptionsDoneButton;
+            if (ui_joy_pressed & BTN_START) return OptionsOptions2Button;
+        }
+        #undef DRAW_OPTS
+    }
+
+    /* ── Options2 (more toggles) ───────────────────────────────────────── */
+    case Options2Form: {
+        static const struct { int id; const char* lbl; } opts2[] = {
+            {Options2AutoNewsPayCheckbox,   "Auto-pay newspaper"},
+            {Options2ShowRangeCheckbox,     "Show tracked range"},
+            {Options2TrackAutoOffCheckbox,  "Track auto-off"},
+            {Options2TextualEncountersCheckbox, "Textual encounters"},
+            {Options2RemindLoansCheckbox,   "Remind about loans"},
+            {0, NULL}
+        };
+        int cur = 0, n = 5, i;
+
+        #define DRAW_OPTS2() do { \
+            ui_clear_body(); ui_title("OPTIONS 2"); \
+            for (i = 0; opts2[i].id; i++) { \
+                int v = GEN_CtlGetValue(opts2[i].id); \
+                int p = (i == cur) ? PAL_HILIGHT : PAL_NORMAL; \
+                ui_printf(0, UI_BODY_TOP+i, p, "[%c] %s", v ? 'X' : ' ', opts2[i].lbl); \
+            } \
+            ui_status("UP/DN=move  A=toggle  B=done"); \
+        } while(0)
+
+        DRAW_OPTS2();
+        for (;;) {
+            ui_vsync();
+            if (ui_joy_pressed & BTN_DOWN && cur < n-1) { cur++; DRAW_OPTS2(); }
+            if (ui_joy_pressed & BTN_UP   && cur > 0)   { cur--; DRAW_OPTS2(); }
+            if (ui_joy_pressed & BTN_A) {
+                GEN_CtlSetValue(opts2[cur].id, GEN_CtlGetValue(opts2[cur].id) ? 0 : 1);
+                DRAW_OPTS2();
+            }
+            if (ui_joy_pressed & BTN_B) return Options2ConeButton;
+        }
+        #undef DRAW_OPTS2
+    }
+
+    /* ── Info-only dialogs ─────────────────────────────────────────────── */
+    case AboutForm:
+        ui_alert("Space Trader 1.2.0\nGenesis port");
+        return (u16)(formID + 1);
+
+    case ShortcutsForm:
+    case CheatForm:
+    case RareCheatForm:
+    case SpecificationForm:
+    case QuestListForm:
+        _lbl_body(body, sizeof(body));
+        ui_alert(body[0] ? body : "(no content)");
+        return (u16)(formID + 1);
+
+    /* ── Generic fallback ──────────────────────────────────────────────── */
+    default:
+        _lbl_body(body, sizeof(body));
+        result = ui_confirm(body[0] ? body : "Continue?");
+        return (u16)(result ? formID + 1 : formID + 2);
     }
 }
 
-/* EvtAddEventToQueue – store for retrieval on next GEN_EvtGetEvent call */
+/* =========================================================================
+ * §12  Field access
+ * ====================================================================== */
+__attribute__((used)) char* GEN_FldGetTextPtr(int fieldID)
+    { (void)fieldID; return ui_field_buf; }
 
+__attribute__((used)) void GEN_FldSetTextFromStr(int fieldID, const char* s)
+{
+    (void)fieldID;
+    strncpy(ui_field_buf, s, sizeof(ui_field_buf)-1);
+    ui_field_buf[sizeof(ui_field_buf)-1] = '\0';
+}
+
+/* =========================================================================
+ * §13  Control & list values
+ * ====================================================================== */
+#define MAX_CTRL 64
+static int _cval[MAX_CTRL];
+
+__attribute__((used)) int  GEN_CtlGetValue(int id)       { return _cval[(unsigned)id % MAX_CTRL]; }
+__attribute__((used)) void GEN_CtlSetValue(int id, int v) { _cval[(unsigned)id % MAX_CTRL] = v; }
+
+static int _lsel[8];
+__attribute__((used)) int  GEN_LstGetSelection(int id)         { return _lsel[(unsigned)id % 8]; }
+__attribute__((used)) void GEN_LstSetSelection(int id, int v)  { _lsel[(unsigned)id % 8] = v; }
+
+/* =========================================================================
+ * §14  Win rendering no-ops
+ * (Game handlers still call these; we silence them.)
+ * ====================================================================== */
+__attribute__((used)) void GEN_WinDrawChars(const char* s, int l, int x, int y)
+    {(void)s;(void)l;(void)x;(void)y;}
+__attribute__((used)) void GEN_WinEraseRectangle(const RectangleType* r, int c)
+    {(void)r;(void)c;}
+__attribute__((used)) void GEN_WinDrawLine(int x1,int y1,int x2,int y2)
+    {(void)x1;(void)y1;(void)x2;(void)y2;}
+__attribute__((used)) void GEN_WinFillRectangle(const RectangleType* r, int c)
+    {(void)r;(void)c;}
+__attribute__((used)) void GEN_WinDrawBitmap(BitmapPtr b, int x, int y)
+    {(void)b;(void)x;(void)y;}
+
+/* =========================================================================
+ * §15  Event queue
+ * ====================================================================== */
+static EventType _eq;
+static int       _eq_full;
 
 __attribute__((used)) void GEN_EvtAddEventToQueue(const EventType* ep)
+    { _eq = *ep; _eq_full = 1; }
+
+__attribute__((used)) void GEN_EvtGetEvent(EventType* ep, int32_t timeout)
 {
-    _queued_event = *ep;
-    _has_queued_event = 1;
+    (void)timeout;
+    ui_vsync();
+    memset(ep, 0, sizeof(*ep));
+    if (_eq_full)      { *ep = _eq; _eq_full = 0; return; }
+    if (_pending_open) {
+        ep->eType = frmOpenEvent;
+        ep->data.frmOpen.formID = (u16)ui_current_form;
+        _pending_open = 0;
+        return;
+    }
+    ep->eType = nilEvent;
 }
 
-/* Patch GEN_EvtGetEvent to drain queue first */
-/* (The original is defined above; we wrap it with a static override here) */
-/* Actually override by patching: prepend queue check */
-/* We'll do this by making the original check a flag */
+__attribute__((used)) u32 GEN_KeyCurrentState(void) { return (u32)ui_joy_held; }
 
-/* AmountH is a local variable in Field.c; no global needed */
+/* =========================================================================
+ * §16  System misc
+ * ====================================================================== */
+static u32 _rng = 12345UL;
+__attribute__((used)) int32_t GEN_SysRandom(int32_t seed)
+{
+    if (seed) _rng = (u32)seed;
+    _rng = _rng * 1664525UL + 1013904223UL;
+    return (int32_t)(_rng >> 1);
+}
+__attribute__((used)) u32 GEN_TimGetTicks(void) { return ui_frame_count; }
 
-/* Dummy ControlType instance for FrmGetObjectPtr stub */
+/* =========================================================================
+ * §17  Memory pool
+ * ====================================================================== */
+static u8  _pool[8192];
+static u16 _pool_top;
+__attribute__((used)) void* PalmMem_Alloc(u16 size)
+{
+    void* p;
+    size = (u16)((size + 1u) & ~1u);
+    if (_pool_top + size > sizeof(_pool)) { kprintf("PalmMem_Alloc: OOM"); return NULL; }
+    p = &_pool[_pool_top]; _pool_top += size;
+    memset(p, 0, size);
+    return p;
+}
+void PalmMem_Free(void* p) { (void)p; }
+
+
+/* GEN_Alert — used by ErrDisplayFileLineMsg and ErrFatalDisplayIf macros */
+__attribute__((used)) void GEN_Alert(const char* msg) { ui_alert(msg); }
+
+/* =========================================================================
+ * §18  Dummy control instance (returned by FrmGetObjectPtr shim)
+ * ====================================================================== */
 ControlType _gen_dummy_control = { { 0 } };
-
-/* GEN_FrmCustomAlert – like GEN_FrmAlert but with substitution strings */
-__attribute__((used)) uint16_t GEN_FrmCustomAlert(int alertID, const char* s1, const char* s2, const char* s3)
-{
-    char body[128];
-    /* Build message by concatenating available strings */
-    snprintf(body, sizeof(body), "%s %s %s",
-             s1 ? s1 : "", s2 ? s2 : "", s3 ? s3 : "");
-    /* Trim trailing spaces */
-    int len = (int)strlen(body);
-    while (len > 0 && body[len-1] == ' ') body[--len] = '\0';
-
-    Boolean result = ui_msgbox("Alert", body, true);
-    (void)alertID;
-    /* Return 0 for first button (Yes/OK), 1 for second (No/Cancel) */
-    return result ? 0 : 1;
-}

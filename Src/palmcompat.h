@@ -145,7 +145,8 @@ extern void GEN_FrmGotoForm(int formID);
 extern int  GEN_FrmGetActiveFormID(void);
 extern FormPtr GEN_FrmGetActiveForm(void);
 
-#define FrmGotoForm(id)         GEN_FrmGotoForm(id)
+extern void palm_form_to_screen(int formID);
+#define FrmGotoForm(id)         palm_form_to_screen(id)
 #define FrmGetActiveFormID()    GEN_FrmGetActiveFormID()
 #define FrmGetActiveForm()      GEN_FrmGetActiveForm()
 
@@ -164,10 +165,13 @@ extern Boolean GEN_FrmDispatchEvent(struct _EventType* ep);
 /* Alerts – routed to UI message box */
 extern void GEN_Alert(const char* msg);
 extern int  GEN_FrmAlert(int alertID);
-#define FrmAlert(id)            GEN_FrmAlert(id)
+extern int ui_alert_id(int alertID);
+#define FrmAlert(id)            ui_alert_id(id)
 /* FrmCustomAlert returns the button pressed (like FrmAlert) */
 extern uint16_t GEN_FrmCustomAlert(int id, const char* s1, const char* s2, const char* s3);
-#define FrmCustomAlert(id,s1,s2,s3) GEN_FrmCustomAlert(id,s1,s2,s3)
+/* FrmCustomAlert: show alert with substitution strings */
+extern int ui_custom_alert(int alertID, const char* s1, const char* s2, const char* s3);
+#define FrmCustomAlert(id,s1,s2,s3) ui_custom_alert(id,s1,s2,s3)
 
 /* Field (text input) stubs – no keyboard on Genesis;
    commander name is entered via letter-picker in ui.c */
