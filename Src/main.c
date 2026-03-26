@@ -43,8 +43,8 @@ static u16 show_splash(void)
 u16 main(u16 hardReset)
 {
     (void)hardReset;
-    VDP_setScreenWidth320();
     kprintf("main: start");
+    VDP_setScreenWidth320();
     ui_init();
     SRAM_enable();
     SRAM_disable();

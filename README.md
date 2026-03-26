@@ -1,4 +1,4 @@
-# Space Trader 1.2.0 — Sega Genesis Port
+# Space Trader 0.0.2 — Sega Genesis Port
 ## Build & Architecture Notes
 
 ---
