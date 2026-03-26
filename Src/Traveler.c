@@ -1317,6 +1317,8 @@ Boolean StartNewGame( void )
 	i = 0;
 	while (i < MAXSOLARSYSTEM)
 	{
+		/* Feed SGDK watchdog - galaxy generation can take many iterations */
+		SYS_doVBlankProcess();
 		if (i < MAXWORMHOLE)
 		{
 			// Place the first system somewhere in the centre
@@ -1388,6 +1390,7 @@ Boolean StartNewGame( void )
 	// names in the alphabet are all in the centre
 	for (i=0; i<MAXSOLARSYSTEM; ++i)
 	{
+		SYS_doVBlankProcess();
 		d = 0;
 		while (d < MAXWORMHOLE)
 		{
@@ -1427,6 +1430,7 @@ Boolean StartNewGame( void )
 	i = 1;
 	while (i <= MAXCREWMEMBER)
 	{
+		SYS_doVBlankProcess(); /* keep watchdog alive */
 		Mercenary[i].CurSystem = GetRandom( MAXSOLARSYSTEM );
 		
 		Redo = false;

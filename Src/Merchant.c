@@ -547,7 +547,9 @@ void AppEventLoop_legacy(void)
 
         /* Skip nil events entirely - no handler cares about them */
         if (event.eType == nilEvent) continue;
-                if (!AppHandleEvent(&event))
+        kprintf("AppEventLoop: dispatching eType=%d CurForm=%d",
+                (int)event.eType, (int)CurForm);
+        if (!AppHandleEvent(&event))
             FrmDispatchEvent(&event);
 
         if (CurForm != EncounterForm)

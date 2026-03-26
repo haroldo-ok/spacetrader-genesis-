@@ -453,36 +453,26 @@ static void screen_system_info(void)
 static void screen_warp(void)
 {
     int i, n = 0;
-    /* Build list of all systems except current */
+    /* Build list of reachable + nearby systems */
     int nearby[MAXSOLARSYSTEM];
-    long sqrdist[MAXSOLARSYSTEM];   /* pre-computed sqr distances for sort */
-    int  dist[MAXSOLARSYSTEM];      /* pre-computed real distances for display */
     int fuel = GetFuel();
 
     for (i = 0; i < MAXSOLARSYSTEM; i++) {
-        if (i != COMMANDER.CurSystem) {
-            nearby[n] = i;
-            sqrdist[n] = SqrDistance(CURSYSTEM, SolarSystem[i]);
-            dist[n]    = (int)RealDistance(CURSYSTEM, SolarSystem[i]);
-            n++;
-        }
+        if (i != COMMANDER.CurSystem)
+            nearby[n++] = i;
     }
-    /* Sort by sqr distance — same ordering as real distance, no sqrt needed */
-    int j, tmp; long stmp;
+    /* Sort by distance */
+    /* Simple insertion sort */
+    int j, tmp;
     for (i = 1; i < n; i++) {
-        tmp  = nearby[i];
-        stmp = sqrdist[i];
+        tmp = nearby[i];
         j = i - 1;
-        int dtmp = dist[i];
-        while (j >= 0 && sqrdist[j] > stmp) {
-            nearby[j+1]  = nearby[j];
-            sqrdist[j+1] = sqrdist[j];
-            dist[j+1]    = dist[j];
+        while (j >= 0 && RealDistance(CURSYSTEM, SolarSystem[nearby[j]]) >
+                         RealDistance(CURSYSTEM, SolarSystem[tmp])) {
+            nearby[j+1] = nearby[j];
             j--;
         }
-        nearby[j+1]  = tmp;
-        sqrdist[j+1] = stmp;
-        dist[j+1]    = dtmp;
+        nearby[j+1] = tmp;
     }
 
     int sel = 0;   /* index into nearby[] */
@@ -494,15 +484,14 @@ static void screen_warp(void)
         ui_title("WARP"); \
         int _r; \
         for (_r = 0; _r < vis && (top + _r) < n; _r++) { \
-            int _idx = top + _r; \
-            int _si  = nearby[_idx]; \
-            int _d   = dist[_idx]; \
-            int _pal = (_idx == sel) ? PAL_HILIGHT : \
-                       (_d <= fuel ? PAL_NORMAL : PAL_DIM); \
+            int _si = nearby[top + _r]; \
+            int _dist = RealDistance(CURSYSTEM, SolarSystem[_si]); \
+            int _pal = (_r + top == sel) ? PAL_HILIGHT : \
+                       (_dist <= fuel ? PAL_NORMAL : PAL_DIM); \
             ui_printf(0, UI_BODY_TOP + _r, _pal, \
                 "%-14s %3d ly%s", \
-                SolarSystemName[SolarSystem[_si].NameIndex], _d, \
-                (_d <= fuel ? "" : " x")); \
+                SolarSystemName[SolarSystem[_si].NameIndex], _dist, \
+                (_dist <= fuel ? "" : " x")); \
         } \
         ui_status_fmt("A=Warp  B=Back  %d/%d systems", sel+1, n); \
     } while(0)

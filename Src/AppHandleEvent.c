@@ -474,6 +474,7 @@ Boolean AppHandleEvent( EventPtr eventP)
 	Set = 0L;
 	Dock = -1;
 	if (eventP->eType != nilEvent)
+		kprintf("AppHandleEvent: eType=%d CurForm=%d", (int)eventP->eType, (int)CurForm);
 
 	if (eventP->eType == frmLoadEvent)
 	{
@@ -604,6 +605,8 @@ Boolean AppHandleEvent( EventPtr eventP)
 
 		}
 
+		kprintf("AppHandleEvent: frmLoadEvent formId=%d Set=%s",
+			(int)formId, Set ? "OK" : "NULL");
 		if (Set != 0L)
 			FrmSetEventHandler( frmP, Set );
 

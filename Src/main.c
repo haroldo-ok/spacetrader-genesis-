@@ -28,10 +28,14 @@ static u16 show_splash(void)
     ui_printf(0, 11, PAL_NORMAL, "  Sega Genesis Port");
     ui_printf(0, 12, PAL_DIM,    "  Pieter Spronck / SGDK 1.70");
     ui_printf(0, UI_STATUS_ROW,  PAL_STATUS, "  A=New Game       B=Continue  ");
+    kprintf("splash: draw done");
+    kprintf("splash: loop start BTN_A=0x%04x", (int)BTN_A);
     for (;;) {
         ui_vsync();
-        if (ui_joy_pressed & (BTN_A|BTN_B|BTN_START))
+        if (ui_joy_pressed & (BTN_A|BTN_B|BTN_START)) {
+            kprintf("splash: exit btn=0x%04x", (int)ui_joy_pressed);
             return ui_joy_pressed;
+        }
     }
 }
 
@@ -43,9 +47,12 @@ static u16 show_splash(void)
 u16 main(u16 hardReset)
 {
     (void)hardReset;
-    kprintf("main: start");
+    /* First KLog - before ANY init. If this doesn't appear, main() is not reached. */
+    kprintf("main: reached");
     VDP_setScreenWidth320();
+    kprintf("main: VDP width set");
     ui_init();
+    kprintf("main: ui_init returned");
     SRAM_enable();
     SRAM_disable();
 
