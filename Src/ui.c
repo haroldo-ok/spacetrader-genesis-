@@ -84,42 +84,24 @@ static const u8 _pal_hw[6] = { 0,1,2,3,1,3 };
  * ====================================================================== */
 void ui_init(void)
 {
-    kprintf("ui_init: calling JOY_init");
     JOY_init();
-    kprintf("ui_init: JOY_init done");
     PAL_setColors(0, _pal_data, 64, CPU);
-    kprintf("ui_init: PAL set");
     VDP_clearPlane(BG_A, TRUE);
     VDP_clearPlane(BG_B, TRUE);
     VDP_clearPlane(WINDOW, TRUE);
-    kprintf("ui_init: planes cleared");
     ui_frame_count = ui_current_form = ui_joy_pressed = ui_joy_held = 0;
     ui_field_buf[0] = '\0';
-    kprintf("ui_init: done");
+    kprintf("ui_init done");
 }
 
 void ui_vsync(void)
 {
     u16 cur;
-    /* If SYS_doVBlankProcess hangs, frame_count won't increment */
-    if (ui_frame_count == 0)
-        kprintf("vsync: first call, about to SYS_doVBlankProcess");
     SYS_doVBlankProcess();
     ui_frame_count++;
-    if (ui_frame_count == 1)
-        kprintf("vsync: SYS_doVBlankProcess returned (frame 1)");
     cur = JOY_readJoypad(JOY_1);
     ui_joy_pressed = cur & ~ui_joy_held;
     ui_joy_held    = cur;
-    /* Log raw value for first 5 frames and every 2 seconds (120 frames) */
-    if (ui_frame_count <= 5 || (ui_frame_count % 120) == 0)
-        kprintf("vsync #%d raw=0x%04x pressed=0x%04x held=0x%04x",
-                (int)ui_frame_count, (int)cur,
-                (int)ui_joy_pressed, (int)ui_joy_held);
-    if (ui_joy_pressed)
-        kprintf("BTN: 0x%04x  BTN_A=0x%04x match=%d",
-                (int)ui_joy_pressed, (int)BTN_A,
-                (int)!!(ui_joy_pressed & BTN_A));
 }
 
 /* =========================================================================
