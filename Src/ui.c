@@ -1097,3 +1097,45 @@ __attribute__((used)) u16 GEN_FrmCustomAlert(int id,
  * §18  Dummy control instance (returned by FrmGetObjectPtr shim)
  * ====================================================================== */
 ControlType _gen_dummy_control = { { 0 } };
+
+/* =========================================================================
+ * §  Galaxy generation progress screen
+ * Shown during StartNewGame() so the player knows the game is loading.
+ * ====================================================================== */
+void ui_gen_progress(int step, int total, const char* msg)
+{
+    int i, bar_width = 36;
+    int filled = (step * bar_width) / total;
+    char bar[40];
+
+    if (step == 1) {
+        /* First call: draw the full loading screen */
+        VDP_clearPlane(WINDOW, TRUE);
+        VDP_setTextPalette(2);  /* PAL2 = cyan = PAL_TITLE */
+        VDP_drawText("  SPACE TRADER 1.2.0", 0, 4);
+        VDP_setTextPalette(0);
+        VDP_drawText("  Sega Genesis Port", 0, 5);
+        VDP_drawText("  Starting new game...", 0, 7);
+    }
+
+    /* Build progress bar: [####....] */
+    bar[0] = '[';
+    for (i = 1; i <= bar_width; i++)
+        bar[i] = (i <= filled) ? '#' : '.';
+    bar[bar_width + 1] = ']';
+    bar[bar_width + 2] = '\0';
+
+    /* Draw bar and message — overwrite previous lines */
+    VDP_setTextPalette(1);  /* PAL1 = yellow */
+    VDP_drawText(bar, 2, 10);
+    VDP_setTextPalette(0);
+    /* Pad message to full width to erase previous longer text */
+    {
+        char padded[UI_COLS + 1];
+        int j = 0;
+        while (msg[j] && j < UI_COLS - 2) { padded[j] = msg[j]; j++; }
+        while (j < UI_COLS - 2) padded[j++] = ' ';
+        padded[j] = '\0';
+        VDP_drawText(padded, 2, 12);
+    }
+}
