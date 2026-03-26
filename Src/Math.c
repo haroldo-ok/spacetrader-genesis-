@@ -43,15 +43,22 @@
 // *************************************************************************
 static int ST_sqrt( int a )
 {
-	int i;
-	
-	i = 0;
-	while (SQR( i ) < a)
-		++i;
-	if (i > 0)
-		if ((SQR( i ) - a) > (a - SQR( i-1 )))
-			--i;
-	return( i );
+	/* Binary search sqrt: O(log n) vs original O(sqrt(n)) linear search.
+	 * Max galaxy input is ~34100 (diagonal^2), ~8 iterations vs ~185.
+	 * Matches original rounding behaviour exactly (verified for 0..34300). */
+	int lo, hi, mid, i;
+	if (a <= 0) return 0;
+	lo = 0; hi = 200;
+	while (lo < hi) {
+		mid = (lo + hi + 1) >> 1;
+		if (SQR(mid) <= a) lo = mid;
+		else               hi = mid - 1;
+	}
+	/* lo = floor(sqrt(a)).  Original loop stopped at ceil, so match that. */
+	i = (SQR(lo) == a) ? lo : lo + 1;
+	if (i > 0 && (SQR(i) - a) > (a - SQR(i-1)))
+		--i;
+	return i;
 }
 
 // *************************************************************************
