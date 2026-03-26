@@ -403,23 +403,24 @@ static void screen_system_info(void)
                 }
             }
             #undef _DRAW_MENU
-            /* Redraw system info if we cancelled and didn't navigate away */
-            if (_next_screen == SCREEN_NONE) {
-                deliver_open(SystemInformationFormHandleEvent, SystemInformationForm);
-                ui_clear_body();
-                ui_title(SolarSystemName[CURSYSTEM.NameIndex]);
-                ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL, "Tech   : %-14s", TechLevel[CURSYSTEM.TechLevel]);
-                ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "Govt   : %-14s", Politics[CURSYSTEM.Politics].Name);
-                ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL, "Police : %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPolice]);
-                ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL, "Pirates: %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPirates]);
-                ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL, "Size   : %-14s", SystemSize[CURSYSTEM.Size]);
-                ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL, "Res    : %-14s", SpecialResources[CURSYSTEM.SpecialResources]);
-                ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL, "Status : %-14s", Status[CURSYSTEM.Status]);
-                ui_printf(0, UI_BODY_TOP + 8, PAL_NORMAL, "Fuel   : %d/%d  Credits: %ld",
-                          (int)Ship.Fuel, (int)Shiptype[Ship.Type].FuelTanks, Credits);
-                ui_status("A=Warp  B=Menu  C=Status  S=News");
-            }
-            continue;  /* don't break — re-enter event loop */
+            /* If a menu item set _next_screen, break immediately — don't
+             * re-enter wait_button() in the outer loop before checking it. */
+            if (_next_screen != SCREEN_NONE) break;
+            /* Cancelled — redraw system info and re-enter event loop */
+            deliver_open(SystemInformationFormHandleEvent, SystemInformationForm);
+            ui_clear_body();
+            ui_title(SolarSystemName[CURSYSTEM.NameIndex]);
+            ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL, "Tech   : %-14s", TechLevel[CURSYSTEM.TechLevel]);
+            ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "Govt   : %-14s", Politics[CURSYSTEM.Politics].Name);
+            ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL, "Police : %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPolice]);
+            ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL, "Pirates: %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPirates]);
+            ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL, "Size   : %-14s", SystemSize[CURSYSTEM.Size]);
+            ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL, "Res    : %-14s", SpecialResources[CURSYSTEM.SpecialResources]);
+            ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL, "Status : %-14s", Status[CURSYSTEM.Status]);
+            ui_printf(0, UI_BODY_TOP + 8, PAL_NORMAL, "Fuel   : %d/%d  Credits: %ld",
+                      (int)Ship.Fuel, (int)Shiptype[Ship.Type].FuelTanks, Credits);
+            ui_status("A=Warp  B=Menu  C=Status  S=News");
+            continue;  /* re-enter outer event loop */
         }
         if (joy & BTN_C) {
             ui_goto_screen(SCREEN_COMMANDER_STATUS);
