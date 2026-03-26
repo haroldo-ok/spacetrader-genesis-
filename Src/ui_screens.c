@@ -286,11 +286,15 @@ static void deliver_open(form_handler_t handler, int formID)
 /* Deliver a menu command as a menuEvent so DockedFormDoCommand is called */
 static void deliver_cmd(form_handler_t handler, int cmd)
 {
+    /* menuEvent must go through AppHandleEvent, which routes it to
+     * DockedFormDoCommand. The form handler does NOT handle menuEvent. */
     EventType ev;
+    (void)handler;
+    extern Boolean AppHandleEvent(EventType* ep);
     memset(&ev, 0, sizeof(ev));
     ev.eType = menuEvent;
     ev.data.menu.itemID = (u16)cmd;
-    handler(&ev);
+    AppHandleEvent(&ev);
 }
 
 /* Deliver a button press as a ctlSelectEvent */
