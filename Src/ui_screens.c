@@ -286,11 +286,15 @@ static void deliver_open(form_handler_t handler, int formID)
 /* Deliver a menu command as a menuEvent so DockedFormDoCommand is called */
 static void deliver_cmd(form_handler_t handler, int cmd)
 {
+    /* menuEvent must go through AppHandleEvent, which routes it to
+     * DockedFormDoCommand. The form handler does NOT handle menuEvent. */
     EventType ev;
+    (void)handler;
+    extern Boolean AppHandleEvent(EventType* ep);
     memset(&ev, 0, sizeof(ev));
     ev.eType = menuEvent;
     ev.data.menu.itemID = (u16)cmd;
-    handler(&ev);
+    AppHandleEvent(&ev);
 }
 
 /* Deliver a button press as a ctlSelectEvent */
@@ -399,23 +403,24 @@ static void screen_system_info(void)
                 }
             }
             #undef _DRAW_MENU
-            /* Redraw system info if we cancelled and didn't navigate away */
-            if (_next_screen == SCREEN_NONE) {
-                deliver_open(SystemInformationFormHandleEvent, SystemInformationForm);
-                ui_clear_body();
-                ui_title(SolarSystemName[CURSYSTEM.NameIndex]);
-                ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL, "Tech   : %-14s", TechLevel[CURSYSTEM.TechLevel]);
-                ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "Govt   : %-14s", Politics[CURSYSTEM.Politics].Name);
-                ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL, "Police : %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPolice]);
-                ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL, "Pirates: %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPirates]);
-                ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL, "Size   : %-14s", SystemSize[CURSYSTEM.Size]);
-                ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL, "Res    : %-14s", SpecialResources[CURSYSTEM.SpecialResources]);
-                ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL, "Status : %-14s", Status[CURSYSTEM.Status]);
-                ui_printf(0, UI_BODY_TOP + 8, PAL_NORMAL, "Fuel   : %d/%d  Credits: %ld",
-                          (int)Ship.Fuel, (int)Shiptype[Ship.Type].FuelTanks, Credits);
-                ui_status("A=Warp  B=Menu  C=Status  S=News");
-            }
-            continue;  /* don't break — re-enter event loop */
+            /* If a menu item set _next_screen, break immediately — don't
+             * re-enter wait_button() in the outer loop before checking it. */
+            if (_next_screen != SCREEN_NONE) break;
+            /* Cancelled — redraw system info and re-enter event loop */
+            deliver_open(SystemInformationFormHandleEvent, SystemInformationForm);
+            ui_clear_body();
+            ui_title(SolarSystemName[CURSYSTEM.NameIndex]);
+            ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL, "Tech   : %-14s", TechLevel[CURSYSTEM.TechLevel]);
+            ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "Govt   : %-14s", Politics[CURSYSTEM.Politics].Name);
+            ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL, "Police : %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPolice]);
+            ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL, "Pirates: %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPirates]);
+            ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL, "Size   : %-14s", SystemSize[CURSYSTEM.Size]);
+            ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL, "Res    : %-14s", SpecialResources[CURSYSTEM.SpecialResources]);
+            ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL, "Status : %-14s", Status[CURSYSTEM.Status]);
+            ui_printf(0, UI_BODY_TOP + 8, PAL_NORMAL, "Fuel   : %d/%d  Credits: %ld",
+                      (int)Ship.Fuel, (int)Shiptype[Ship.Type].FuelTanks, Credits);
+            ui_status("A=Warp  B=Menu  C=Status  S=News");
+            continue;  /* re-enter outer event loop */
         }
         if (joy & BTN_C) {
             ui_goto_screen(SCREEN_COMMANDER_STATUS);
@@ -1046,9 +1051,165 @@ static void _enc_status(void)
     ui_print(0, UI_STATUS_ROW, PAL_STATUS, buf);
 }
 
+/* -----------------------------------------------------------------------
+ * Encounter screen renderer
+ * Displays: encounter description, opponent & player ship stats, status.
+ * Called on first open and after each combat round (nilEvent/button).
+ * --------------------------------------------------------------------- */
+static void _draw_encounter(void)
+{
+    int opp_hull_pct, opp_shld_pct, my_hull_pct, my_shld_pct;
+    char opp_shld_buf[12], my_shld_buf[12];
+
+    /* Opponent hull% */
+    opp_hull_pct = Shiptype[Opponent.Type].HullStrength > 0
+        ? (int)((Opponent.Hull * 100) / Shiptype[Opponent.Type].HullStrength)
+        : 0;
+
+    /* Opponent shields */
+    {
+        long ts = TotalShields(&Opponent);
+        long ss = TotalShieldStrength(&Opponent);
+        if (ts <= 0)
+            snprintf(opp_shld_buf, sizeof(opp_shld_buf), "none");
+        else
+            snprintf(opp_shld_buf, sizeof(opp_shld_buf), "%ld%%",
+                (ss * 100) / ts);
+    }
+
+    /* Player hull% */
+    my_hull_pct = GetHullStrength() > 0
+        ? (int)((Ship.Hull * 100) / GetHullStrength())
+        : 0;
+
+    /* Player shields */
+    {
+        long ts = TotalShields(&Ship);
+        if (ts <= 0)
+            snprintf(my_shld_buf, sizeof(my_shld_buf), "none");
+        else
+            snprintf(my_shld_buf, sizeof(my_shld_buf), "%ld%%",
+                (TotalShieldStrength(&Ship) * 100) / ts);
+    }
+
+    ui_clear_body();
+
+    /* Row 0: title */
+    {
+        const char* t = "ENCOUNTER";
+        if (ENCOUNTERPOLICE(EncounterType))          t = "POLICE";
+        else if (ENCOUNTERPIRATE(EncounterType))     t = "PIRATE";
+        else if (ENCOUNTERTRADER(EncounterType))     t = "TRADER";
+        else if (ENCOUNTERMONSTER(EncounterType))    t = "SPACE MONSTER";
+        else if (EncounterType == DRAGONFLYATTACK ||
+                 EncounterType == DRAGONFLYIGNORE)   t = "DRAGONFLY";
+        else if (EncounterType == SCARABATTACK ||
+                 EncounterType == SCARABIGNORE)      t = "SCARAB";
+        else if (EncounterType == MARIECELESTEENCOUNTER) t = "MARIE CELESTE";
+        else if (EncounterType == CAPTAINAHABENCOUNTER ||
+                 EncounterType == CAPTAINCONRADENCOUNTER ||
+                 EncounterType == CAPTAINHUIEENCOUNTER)  t = "FAMOUS CAPTAIN";
+        else if (EncounterType == BOTTLEOLDENCOUNTER ||
+                 EncounterType == BOTTLEGOODENCOUNTER)   t = "FLOATING BOTTLE";
+        ui_title(t);
+    }
+
+    /* Row 2-3: location + encounter description */
+    ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL,
+        "%d click%s from %s:", Clicks, Clicks==1?"":"s",
+        SolarSystemName[SolarSystem[WarpSystem].NameIndex]);
+
+    {
+        char desc[UI_COLS + 1];
+        if (EncounterType == POSTMARIEPOLICEENCOUNTER)
+            snprintf(desc, sizeof(desc), "Customs Police demand your goods.");
+        else if (EncounterType == MARIECELESTEENCOUNTER)
+            snprintf(desc, sizeof(desc), "A drifting ship.");
+        else if (EncounterType == CAPTAINAHABENCOUNTER)
+            snprintf(desc, sizeof(desc), "Captain Ahab!");
+        else if (EncounterType == CAPTAINCONRADENCOUNTER)
+            snprintf(desc, sizeof(desc), "Captain Conrad!");
+        else if (EncounterType == CAPTAINHUIEENCOUNTER)
+            snprintf(desc, sizeof(desc), "Captain Huie!");
+        else if (EncounterType == BOTTLEOLDENCOUNTER ||
+                 EncounterType == BOTTLEGOODENCOUNTER)
+            snprintf(desc, sizeof(desc), "A floating bottle.");
+        else {
+            char opp_desc[24];
+            char ship_name[20];
+            snprintf(ship_name, sizeof(ship_name), "%s", Shiptype[Opponent.Type].Name);
+            ship_name[0] = (char)(ship_name[0] | 0x20); /* lowercase */
+            if (ENCOUNTERPOLICE(EncounterType))
+                snprintf(opp_desc, sizeof(opp_desc), "a police");
+            else if (Opponent.Type == MANTISTYPE)
+                snprintf(opp_desc, sizeof(opp_desc), "an alien");
+            else if (ENCOUNTERPIRATE(EncounterType))
+                snprintf(opp_desc, sizeof(opp_desc), "a pirate");
+            else if (ENCOUNTERTRADER(EncounterType))
+                snprintf(opp_desc, sizeof(opp_desc), "a trader");
+            else if (ENCOUNTERMONSTER(EncounterType))
+                snprintf(opp_desc, sizeof(opp_desc), "the Space Monster");
+            else
+                snprintf(opp_desc, sizeof(opp_desc), "a stolen");
+            if (ENCOUNTERMONSTER(EncounterType))
+                snprintf(desc, sizeof(desc), "You encounter %s!", opp_desc);
+            else
+                snprintf(desc, sizeof(desc), "You encounter %s %s.", opp_desc, ship_name);
+        }
+        ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "%s", desc);
+    }
+
+    /* Row 4: encounter status */
+    {
+        const char* st = "";
+        if (EncounterType == POLICEINSPECTION)
+            st = "Police want to inspect you.";
+        else if (EncounterType == POLICEFLEE || EncounterType == TRADERFLEE ||
+                 EncounterType == PIRATEFLEE)
+            st = "Your opponent is fleeing.";
+        else if (EncounterType == PIRATEATTACK || EncounterType == POLICEATTACK ||
+                 EncounterType == TRADERATTACK || EncounterType == SPACEMONSTERATTACK ||
+                 EncounterType == DRAGONFLYATTACK || EncounterType == SCARABATTACK ||
+                 EncounterType == FAMOUSCAPATTACK)
+            st = "Your opponent attacks!";
+        else if (EncounterType == TRADERIGNORE || EncounterType == POLICEIGNORE ||
+                 EncounterType == SPACEMONSTERIGNORE || EncounterType == DRAGONFLYIGNORE ||
+                 EncounterType == PIRATEIGNORE || EncounterType == SCARABIGNORE)
+            st = Cloaked(&Ship, &Opponent) ? "It doesn\'t notice you." : "It ignores you.";
+        else if (EncounterType == TRADERSELL || EncounterType == TRADERBUY)
+            st = "Hailed with an offer to trade.";
+        else if (EncounterType == TRADERSURRENDER || EncounterType == PIRATESURRENDER)
+            st = "Your opponent surrenders!";
+        else if (EncounterType == POSTMARIEPOLICEENCOUNTER)
+            st = "Give up the illegal goods!";
+        if (st[0])
+            ui_printf(0, UI_BODY_TOP + 2, PAL_HILIGHT, "%s", st);
+    }
+
+    /* Separator row */
+
+    /* Opponent ship stats */
+    ui_printf(0, UI_BODY_TOP + 4, PAL_WARN,
+        "THEM: %-12s  Hull:%3d%%  Sh:%s",
+        Shiptype[Opponent.Type].Name, opp_hull_pct, opp_shld_buf);
+
+    /* Player ship stats */
+    ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL,
+        "YOU:  %-12s  Hull:%3d%%  Sh:%s",
+        Shiptype[Ship.Type].Name, my_hull_pct, my_shld_buf);
+
+    /* Auto-combat indicator */
+    if (AutoAttack || AutoFlee) {
+        ui_printf(0, UI_BODY_TOP + 7, PAL_DIM,
+            "Auto-%s active  (Start=stop)",
+            AutoAttack ? "attack" : "flee");
+    }
+}
+
 static void screen_encounter(void)
 {
     deliver_open(EncounterFormHandleEvent, EncounterForm);
+    _draw_encounter();
     _enc_status();
 
     while (_next_screen == SCREEN_NONE) {
@@ -1058,6 +1219,7 @@ static void screen_encounter(void)
             nil_ev.eType = nilEvent;
             EncounterFormHandleEvent(&nil_ev);
             ui_vsync();
+            _draw_encounter();
             _enc_status();
             continue;
         }
@@ -1072,7 +1234,10 @@ static void screen_encounter(void)
                 if (ui_joy_pressed & acts[i].joy_bit) {
                     if (acts[i].ctrl_id)
                         deliver_button(EncounterFormHandleEvent, acts[i].ctrl_id);
-                    _enc_status();
+                    if (_next_screen == SCREEN_NONE) {
+                        _draw_encounter();
+                        _enc_status();
+                    }
                     break;
                 }
             }

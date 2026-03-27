@@ -1313,6 +1313,7 @@ Boolean StartNewGame( void )
 	FntSetFont( stdFont );
 	DrawChars( "Creating Galaxy...", 44, 76 );
 
+	ui_gen_progress(1, 5, "Building galaxy...");
 	// Initialize Galaxy
 	i = 0;
 	while (i < MAXSOLARSYSTEM)
@@ -1384,6 +1385,7 @@ Boolean StartNewGame( void )
 		++i;
 	}
 
+	ui_gen_progress(2, 5, "Placing systems...");
 	// Randomize the system locations a bit more, otherwise the systems with the first
 	// names in the alphabet are all in the centre
 	for (i=0; i<MAXSOLARSYSTEM; ++i)
@@ -1417,6 +1419,7 @@ Boolean StartNewGame( void )
 		Wormhole[j] = x;
 	}
 
+	ui_gen_progress(3, 5, "Hiring crew...");
 	// Initialize mercenary list
 	Mercenary[0].NameIndex = 0;
 	Mercenary[0].Pilot = 1;
@@ -1457,6 +1460,7 @@ Boolean StartNewGame( void )
     // special individuals: Zeethibal, Jonathan Wild's Nephew
     Mercenary[MAXCREWMEMBER-1].CurSystem = 255;
 
+	ui_gen_progress(4, 5, "Adding quests...");
 	// Place special events
 	SolarSystem[ACAMARSYSTEM].Special  = MONSTERKILLED;
 	SolarSystem[BARATASSYSTEM].Special = FLYBARATAS;
@@ -1575,6 +1579,7 @@ Boolean StartNewGame( void )
 		}
 	}
 	
+	ui_gen_progress(5, 5, "Placing commander...");
 	// Initialize Commander
 	for (i=0; i<200; ++i)
 	{

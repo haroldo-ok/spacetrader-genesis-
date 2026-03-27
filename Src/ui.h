@@ -116,4 +116,6 @@ extern char  ui_field_buf[64];
 extern u32   ui_frame_count;
 extern ControlType _gen_dummy_control;
 
+void     ui_gen_progress(int step, int total, const char* msg);
+
 #endif /* UI_H */
