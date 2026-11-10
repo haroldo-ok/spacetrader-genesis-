@@ -675,5 +675,5 @@ Boolean RectangularButtonsOn = false; // Indicates on OS 5.0 and higher whether 
 
 HIGHSCORE Hscores[MAXHIGHSCORE];
 
-DWord romVersion;
+/* romVersion is defined in ui.c */
 

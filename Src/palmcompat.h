@@ -180,8 +180,10 @@ extern void palm_form_to_screen(int formID);
 #define FrmGetActiveForm()      GEN_FrmGetActiveForm()
 
 /* Object show/hide – no-ops on Genesis; screen redrawn on state entry */
-#define FrmShowObject(f,i)      ((void)0)
-#define FrmHideObject(f,i)      ((void)0)
+extern void ui_obj_show(int id, int on);
+extern int ui_last_obj;
+#define FrmShowObject(f,i)      ui_obj_show((i),1)
+#define FrmHideObject(f,i)      ui_obj_show((i),0)
 #define FrmGetObjectIndex(f,id) (id)
 #define FrmDrawForm(f)          ((void)0)
 /* FrmDispatchEvent – calls stored form handler; implemented in ui.c */
@@ -226,8 +228,8 @@ extern void GEN_CtlSetValue(int ctlID, int val);
 #define CtlGetValue(c)          GEN_CtlGetValue((int)(c))
 #define CtlSetValue(c,v)        GEN_CtlSetValue((int)(c),(v))
 #define CtlSetEnabled(c,e)      ((void)0)
-#define CtlShowControl(c)       ((void)0)
-#define CtlHideControl(c)       ((void)0)
+#define CtlShowControl(c)       ui_obj_show(ui_last_obj,1)
+#define CtlHideControl(c)       ui_obj_show(ui_last_obj,0)
 
 /* Lists */
 extern int  GEN_LstGetSelection(int lstID);
@@ -439,7 +441,8 @@ typedef struct { uint8_t r,g,b; } RGBColorType;
 
 /* FrmInitForm – on Genesis, forms are not real widgets; we just return
  * the formID cast as a pointer so form-management code compiles cleanly. */
-#define FrmInitForm(id)              ((FormPtr)((long)(id)))
+extern void ui_labels_clear(void);
+#define FrmInitForm(id)              (ui_labels_clear(), (FormPtr)((long)(id)))
 #define FrmDeleteForm(f)             ((void)0)
 #define FrmGetFormPtr(id)            ((FormPtr)((long)(id)))
 /* FrmSetEventHandler – stores handler; implemented in ui.c */
@@ -447,7 +450,8 @@ extern void GEN_FrmSetEventHandler(FormPtr frm, void* handler);
 #define FrmSetEventHandler(f,h)      GEN_FrmSetEventHandler(f, (void*)(h))
 #define FrmSetActiveForm(f)          ((void)0)
 #define FrmSetMenu(f,id)             ((void)0)
-#define FrmHelp(id)                  ((void)0)
+extern void ui_help(int stringID);
+#define FrmHelp(id)                  ui_help(id)
 #define FrmGetNumberOfObjects(f)     (0)
 #define FrmGetObjectType(f,i)        (0)
 #define FrmGetTitle(f)               ("")
@@ -461,8 +465,9 @@ extern uint16_t GEN_FrmDoDialog(FormPtr frm);
 #define FrmDoDialog(f)               GEN_FrmDoDialog(f)
 
 /* FrmCopyTitle / FrmSetTitle – update title (no-op; we redraw on screen entry) */
-#define FrmCopyTitle(f,s)            ((void)0)
-#define FrmSetTitle(f,s)             ((void)0)
+extern void ui_set_form_title(const char* s);
+#define FrmCopyTitle(f,s)            ui_set_form_title(s)
+#define FrmSetTitle(f,s)             ui_set_form_title(s)
 
 /* FrmCopyLabel – update label text.  Our setLabelText() calls this.
  * We store it so the screen-draw functions can pick it up. */
@@ -500,24 +505,27 @@ extern void GEN_EvtAddEventToQueue(const EventType* ep);
 /* FntCharsInWidth – used in Draw.c for text wrapping */
 #ifndef FNTCHARSINWIDTH_DEFINED
 #define FNTCHARSINWIDTH_DEFINED
-static inline void FntCharsInWidth_stub(const char* s, int* w,
-                                        int* len, Boolean* fits)
+static inline void FntCharsInWidth_stub(const char* s, short* w,
+                                        short* len, Boolean* fits)
 {
+    /* Genesis text is 40 columns: one "pixel column" of 4 Palm pixels per char */
     int maxw = (w && *w > 0) ? *w : 160;
     int slen = (int)strlen(s);
     int lim  = (len && *len > 0 && *len < slen) ? *len : slen;
-    int used = lim * 6;
+    int used = lim * 4;
     if (fits) *fits = (used <= maxw);
-    if (used > maxw) lim = maxw / 6;
-    if (w)   *w   = lim * 6;
-    if (len) *len = lim;
+    if (used > maxw) lim = maxw / 4;
+    if (w)   *w   = (short)(lim * 4);
+    if (len) *len = (short)lim;
 }
 #define FntCharsInWidth(s,w,l,f)     FntCharsInWidth_stub(s,w,l,f)
 #endif /* FNTCHARSINWIDTH_DEFINED */
 
 /* SysCopyStringResource / SysStringByIndex – string resources (no-op) */
-#define SysCopyStringResource(b,id)  ((void)0)
-#define SysStringByIndex(id,i,b,l)   ((void)0)
+extern void ui_copy_string(char* dst, int id);
+extern void ui_string_by_index(int listID, int index, char* dst, int maxlen);
+#define SysCopyStringResource(b,id)  ui_copy_string((b),(id))
+#define SysStringByIndex(id,i,b,l)   ui_string_by_index((id),(i),(b),(l))
 
 /* ULong – used in Draw.c's ScrollButton */
 typedef uint32_t ULong;
@@ -559,7 +567,7 @@ typedef char Char;
 /* FrmGetObjectPtr returns a pointer to a form object (stub = NULL) */
 /* FrmGetObjectPtr: return dummy ControlType so cp->attr.frame is safe */
 extern ControlType _gen_dummy_control;
-#define FrmGetObjectPtr(f,i)    (&_gen_dummy_control)
+#define FrmGetObjectPtr(f,i)    (ui_last_obj = (i), &_gen_dummy_control)
 
 /* StrCaselessCompare */
 #define StrCaselessCompare(a,b) strcasecmp(a,b)

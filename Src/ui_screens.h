@@ -40,6 +40,8 @@ typedef enum {
     SCREEN_RETIRE,
     SCREEN_UTOPIA,
     SCREEN_NEW_COMMANDER,
+    SCREEN_SHIPTYPE_INFO,
+    SCREEN_MAIN,
     SCREEN_QUIT
 } ScreenID;
 
@@ -52,5 +54,8 @@ void ui_game_loop(void);
 
 /* Called by FrmGotoForm macro (palmcompat.h) */
 void palm_form_to_screen(int formID);
+
+ScreenID ui_next_screen(void);
+unsigned char ui_menu(void);
 
 #endif /* UI_SCREENS_H */

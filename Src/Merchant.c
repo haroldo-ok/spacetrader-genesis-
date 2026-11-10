@@ -273,28 +273,26 @@ static void FillGlobals( SAVEGAMETYPE* sg, int State )
 // Load game and returns true if OK
 Boolean LoadGame( int State )
 {
-    /* Genesis port: load from SRAM battery backup */
-    SAVEGAMETYPE sg_buf;
-    SAVEGAMETYPE* sg = &sg_buf;
+    /* Genesis port: the Palm preferences / databases become SRAM slots */
+    extern Boolean sram_has_slot(int slot);
+    extern void sram_load_slot(SAVEGAMETYPE* sg, int slot);
+    extern SAVEGAMETYPE* sram_buffer(void);
+    SAVEGAMETYPE* sg = sram_buffer();
 
-    if (State != 0)
+    if (!sram_has_slot( State ))
     {
-        /* Slot switching (State 1/2) not supported on Genesis – single save only */
-        FrmAlert( CannotLoadAlert );
+        if (State == 0)
+        {
+            CurForm = MainForm;
+            return true; /* no save - start fresh */
+        }
+        if (State == 1)
+            FrmAlert( CannotLoadAlert );
         return false;
     }
 
-    /* Check for SRAM magic */
-    extern Boolean sram_has_save(void);
-    extern void sram_load_full(SAVEGAMETYPE* sg);
-    if (!sram_has_save())
-    {
-        CurForm = MainForm;
-        return true; /* no save – start fresh */
-    }
-
-    sram_load_full(sg);
-    FillGlobals( sg, 0 );
+    sram_load_slot( sg, State );
+    FillGlobals( sg, State );
     return true;
 }
 
@@ -399,9 +397,10 @@ void UnpackBooleans(Byte val, Boolean *a, Boolean *b, Boolean *c, Boolean *d,
 Boolean SaveGame( int State )
 {
     int i;
-    SAVEGAMETYPE sg_buf;
-    SAVEGAMETYPE* sg = &sg_buf;
-    extern void sram_save_full(SAVEGAMETYPE* sg);
+    extern void sram_save_slot(SAVEGAMETYPE* sg, int slot);
+    extern void sram_copy_slot(int from, int to);
+    extern SAVEGAMETYPE* sram_buffer(void);
+    SAVEGAMETYPE* sg = sram_buffer();
 
     /* Pack all game state into sg */
     sg->Credits = Credits;
@@ -489,9 +488,19 @@ Boolean SaveGame( int State )
     sg->Shortcut4 = Shortcut4;
     sg->RectangularButtonsOn = RectangularButtonsOn;
 
-    /* Genesis port: write to SRAM (all States map to single slot) */
-    (void)State;
-    sram_save_full(sg);
+    /* Genesis port: write to the SRAM slot for this State */
+    if (State == 2)
+    {
+        /* Switch Game: park the current game, bring the other game in (or
+         * leave an empty commander name if there is none), then store the
+         * parked game as the new "other" game - same order as the original. */
+        sram_save_slot( sg, 3 );
+        if (!LoadGame( 2 ))
+            NameCommander[0] = '\0';
+        sram_copy_slot( 3, 2 );
+        return true;
+    }
+    sram_save_slot( sg, State );
     return true;
 }
 // *************************************************************************

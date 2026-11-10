@@ -1,166 +1,82 @@
-# Space Trader 0.0.3 — Sega Genesis Port
-## Build & Architecture Notes
+# Space Trader 1.2.2 — Sega Genesis / Mega Drive port (v0.1.0)
 
----
+A source-level port of Pieter Spronck's **Space Trader 1.2.2** (Palm OS) to the
+**Sega Genesis / Mega Drive**, built with **SGDK**.
 
-### Overview
+The game logic is the original C source. The Palm form handlers still run:
+every Genesis screen opens the original handler and delivers the original
+button IDs to it, so trading, warping, combat, the bank, the shipyard, quests
+and special events follow the original rules.
 
-This is a complete source-level port of Pieter Spronck's **Space Trader 1.2.0**
-(Palm OS, 2002) to the **Sega Genesis / Mega Drive** using **SGDK 1.70**.
+## What is in the ROM
 
-The game logic (trading economy, encounters, ships, combat, quests, galaxy map)
-is preserved verbatim from the original C source.  The Palm OS UI toolkit,
-event system, database API, and bitmap resources are replaced by a Genesis-native
-text-mode interface built on SGDK's VDP tile engine.
+- **Original graphics**, converted from the Palm colour resources
+  (`assets_src/MerchantColor.rsrc`) by `tools/convert_assets.py`:
+  - all 15 ship types, each in its normal / damaged / shielded /
+    shielded-and-damaged form, composed at run time like the Palm
+    `ShowShip()` (hull damage and shield strength shown as a split picture);
+  - the title, Retired, Utopia and Destroyed pictures (160x160);
+  - the system, visited-system and wormhole chart icons;
+  - the pirate / police / trader / alien / special encounter icons, the
+    auto-attack indicator and the About icon.
+- **Graphical Short Range Chart and Galactic Chart** with a crosshair cursor,
+  fuel range circle, wormholes, tracking and Find System.
+- **Original text**: all 167 alerts, 242 help / quest strings and the
+  newspaper mastheads and headlines come from `assets_src/Merchant.rsrc`.
+- **All three menus** (Command / Game / Help) including Options, Retire,
+  High Scores, Snapshot, Switch Game and the help pages.
+- **Three save slots** in SRAM: current game (written on arrival at a system
+  and when the menu opens), Snapshot, and Switch Game.
+- **Sound**: the Palm game contains no sound code or sound resources; the only
+  sounds were the Palm OS alert beeps. The port plays PSG beeps for the same
+  four alert types (information, confirmation, warning, error).
 
----
+## Build
 
-### Prerequisites
-
-| Tool | Version | Notes |
-|---|---|---|
-| SGDK | 1.70 | Install to `/opt/sgdk` or set `GDK=` |
-| m68k-elf-gcc | ≥ 9.x | Ships with SGDK |
-| GNU Make | any | |
-
----
-
-### Build
+Needs SGDK (built and tested with **2.11**; only APIs that also exist in 1.70
+are used) and Python 3 + Pillow if you want to regenerate the data tables.
 
 ```bash
-cd spacetrader-genesis
-make GDK=/opt/sgdk
-# Output: out/rom.bin  (~256 KB padded to 1 MB)
+export GDK=/opt/sgdk
+make                # -> out/rom.bin
+python3 tools/convert_assets.py   # optional: regenerates src/gfx_data.* and src/text_data.*
 ```
 
-If your SGDK uses the standard `makefile.gen` include approach:
+The source directory is now `src/` (lower case) so the project also builds on
+case-sensitive file systems.
 
-```bash
-make sgdk GDK=/opt/sgdk
-```
+## Controls
 
----
-
-### Controls (Joypad)
-
-| Button | Action |
+| Where | Buttons |
 |---|---|
-| D-Up / D-Down | Move cursor / scroll list |
-| D-Left / D-Right | Change quantity / secondary navigation |
-| A | Confirm / Select / OK |
-| B | Back / Cancel |
-| C | Info / Alternative action |
-| Start | Options shortcut |
+| Lists and menus | Up/Down move, A select, B back |
+| System Information | A chart, B menu, C commander status, Start newspaper, Up special, Down mercenary |
+| Charts | D-pad jumps between systems, A select / track, C other chart or Find, Start menu |
+| Target System | A warp, C average prices, Up cost specification, Left/Right other systems |
+| Amount dialogs | Left/Right 1, Up/Down 10 (hold to accelerate), A OK, B none, C all |
+| Encounter | buttons shown on the bottom line; Up pokes a tribble |
+| Text entry | D-pad, A add, B delete, Start done, C cancel |
 
----
+## Differences from the Palm version
 
-### Save Game
+- The pen is replaced by the joypad; the Shortcuts form and the
+  hardware-button and rectangular-button options have no meaning here and are
+  left out.
+- The cheat forms (reached by typing a cheat code in Find System) are only
+  partly usable: they shared one text field in this port.
+- 160x160 pictures are shown at their original size; ships are shown at 2x.
+- Colours are reduced to the Genesis 9-bit palette.
 
-The port uses **battery-backed SRAM** (standard on most flash carts and
-some original cartridges).  The SRAM layout is:
+## Source map
 
-```
-Offset 0x0000: [2 bytes]  Game save magic (0xC0DE)
-Offset 0x0002: [~700 bytes]  SAVEGAMETYPE struct (full game state)
-Offset 0x02BE: [2 bytes]  High-score magic (0xBEEF)
-Offset 0x02C0: [3 × 28 bytes]  HIGHSCORE[3] table
-```
-
-Total SRAM used: ~900 bytes.  Carts with 8 KB SRAM (the most common size)
-have ample room.
-
-If no battery backup is available the game still runs; it simply cannot
-persist between sessions.
-
----
-
-### Architecture
-
-#### File map
-
-| File(s) | Role |
+| File | Role |
 |---|---|
-| `src/palmcompat.h` | Complete Palm OS → C99 type and API shim |
-| `src/palmcompat_extra.h` | Additional Palm types (SWord, Handle, FtrGet, etc.) |
-| `src/external.h` | Rewritten global-variable declaration header |
-| `src/ui.h` / `src/ui.c` | Genesis UI engine: VDP text rendering, widgets, SRAM, all Palm API stubs |
-| `src/main.c` | SGDK `int main()` entry point; splash, name entry, delegates to game |
-| `src/Field.c` | Replaced: field widget → ui_field_buf text storage |
-| `src/Merchant.c` | Patched: SaveGame/LoadGame→SRAM, AppEventLoop→SGDK, Palm entry removed |
-| `src/Traveler.c` | Patched: OpenDatabase/SaveStatus→SRAM |
-| `src/Global.c` | Patched: Palm includes removed |
-| `src/*.c` (all others) | Unmodified game logic; compile cleanly via palmcompat.h |
-
-#### UI engine
-
-The `ui_*` functions provide a 40×28 character tile display on the Genesis
-VDP Plane B (8×8 pixel tiles at 320×224).
-
-**Screen state machine**: the Palm OS `FrmGotoForm(id)` macro sets
-`ui_current_form = id`, which causes `GEN_EvtGetEvent` to inject a
-`frmOpenEvent` on the next call.  The original `AppHandleEvent` dispatches
-this to the appropriate form handler, which calls `FrmDrawForm` (no-op)
-and then populates the screen via the `WinDrawChars` / `setLabelText` /
-`EraseRectangle` etc. stubs — all of which ultimately write to the tile
-plane via `ui_print`.
-
-**Modal dialogs** (`FrmDoDialog`): For quantity-entry forms
-(buy/sell/plunder amounts), `GEN_FrmDoDialog` presents a number spinner
-(Left/Right to change value, A to confirm).  For yes/no forms it shows a
-two-line message box.  The return value maps to the original Palm button-ID
-constant expected by the calling code.
-
-**Galactic chart**: `ui_draw_galaxy_map()` renders all 120 solar systems
-as dot characters scaled from the 150×110 coordinate space to the 38×22
-tile body area.  Visited systems use `*`, unvisited use `.`.
-
----
-
-### Known Limitations
-
-1. **No graphical ship art**: The Palm bitmap resources (`.rsrc` files) are
-   Palm-proprietary format and cannot be compiled for Genesis.  Ship images
-   in the encounter screen are omitted; the encounter text is displayed
-   instead.  Adding tile graphics is straightforward via `res/*.res` SGDK
-   resource files.
-
-2. **Single save slot**: The Palm version supported two save slots (main +
-   "switch game").  The Genesis port uses one SRAM slot.  The `SaveGame(2)` /
-   `LoadGame(2)` switch-game path returns `false`, which the game handles
-   gracefully.
-
-3. **Commander name entry**: Uses a letter-picker grid (A-Z, a-z, 0-9,
-   special chars).  Navigate with D-pad, A=add letter, B=backspace, C=done.
-
-4. **No Graffiti / text input**: All text entry is via the letter-picker or
-   spinner widgets.  Quantity fields that originally accepted keyboard input
-   now use the spinner.
-
-5. **News/newspaper screen**: The scrolling newspaper text works correctly
-   since it uses `DrawChars`/`DisplayPage` which route through `WinDrawChars`
-   to our tile renderer.
-
----
-
-### Porting decisions
-
-- **Palm `Boolean`** → `uint8_t` (0/false, 1/true).  The original code
-  sometimes assigns integer results (0/1) directly, which remains valid.
-
-- **`MemHandleNew` / `MemHandleFree`** → bump allocator in an 8 KB static
-  pool.  The game allocates handles during form display and frees them
-  immediately; the bump allocator never overflows within a session.
-
-- **`FrmDoDialog` return values**: The Palm version returned the resource ID
-  of the button the user pressed.  Our stub returns the correct button-ID
-  constant for each known form (BuyItemYesButton, GetLoanEverythingButton,
-  etc.) or a generic `formID+1` / `formID+2` pair for unknown forms.
-
-- **`evtWaitForever`** (-1) passed to `GEN_EvtGetEvent` causes the function
-  to block at `ui_vsync()` until a joypad event occurs, matching the
-  original behaviour.
-
----
+| `src/gfx.c`, `src/gfx.h` | bitmap layer (plane B), ship compositor, cursor sprite, PSG beeps |
+| `src/gfx_data.c`, `src/text_data.c` | generated from the Palm resources |
+| `src/ui.c`, `src/ui_extra.c` | text UI, dialogs, alerts, help viewer, keyboard, SRAM, Palm API shims |
+| `src/ui_screens.c`, `src/ui_charts.c` | the Genesis screens |
+| `src/palmcompat*.h` | Palm OS types and API shims |
+| everything else in `src/` | original game source |
 
 ### License
 

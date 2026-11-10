@@ -11,6 +11,7 @@
 
 #include "genesis.h"
 #include "ui.h"
+#include "gfx.h"
 #include "ui_screens.h"
 #include "external.h"
 #include "compat.h"
@@ -59,37 +60,15 @@ ScreenID ui_current_screen(void)
     return _cur_screen;
 }
 
+ScreenID ui_next_screen(void)
+{
+    return _next_screen;
+}
+
 /* -----------------------------------------------------------------------
  * Local quantity spinner (ui_screens-private)
  * Replaces old ui_ask_quantity; does NOT conflict with ui.c symbols.
  * --------------------------------------------------------------------- */
-static int _ask_qty(const char* title, const char* item, int max, int price)
-{
-    int qty = 0;
-    char pricebuf[48];
-    if (max <= 0) return 0;
-    if (price > 0)
-        snprintf(pricebuf, sizeof(pricebuf), "%s  @%d cr each", item, price);
-    else
-        snprintf(pricebuf, sizeof(pricebuf), "%s", item);
-    ui_clear_body();
-    ui_title(title);
-    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "%s", pricebuf);
-    ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL, "Max: %d", max);
-    ui_printf(0, UI_BODY_TOP + 5, PAL_HILIGHT, "Qty: %-6d", qty);
-    ui_status("LR=change  Up=max  Dn=0  A=OK  B=cancel");
-    for (;;) {
-        int ch = 0;
-        ui_vsync();
-        if (ui_joy_pressed & BTN_RIGHT) { if (qty < max) { qty++; ch=1; } }
-        if (ui_joy_pressed & BTN_LEFT)  { if (qty > 0)   { qty--; ch=1; } }
-        if (ui_joy_pressed & BTN_UP)    { qty = max; ch=1; }
-        if (ui_joy_pressed & BTN_DOWN)  { qty = 0;   ch=1; }
-        if (ch) ui_printf(0, UI_BODY_TOP + 5, PAL_HILIGHT, "Qty: %-6d", qty);
-        if (ui_joy_pressed & BTN_A) return qty;
-        if (ui_joy_pressed & BTN_B) return 0;
-    }
-}
 
 
 
@@ -122,6 +101,10 @@ static void screen_destroyed(void);
 static void screen_retire(void);
 static void screen_utopia(void);
 static void screen_new_commander(void);
+static void screen_shiptype_info(void);
+static void screen_main(void);
+extern void screen_warp_gfx(void);
+extern void screen_galactic_gfx(void);
 
 /* -----------------------------------------------------------------------
  * Screen dispatch table
@@ -155,6 +138,8 @@ static const struct { ScreenID id; screen_fn_t fn; } _screens[] = {
     { SCREEN_RETIRE,           screen_retire           },
     { SCREEN_UTOPIA,           screen_utopia           },
     { SCREEN_NEW_COMMANDER,    screen_new_commander    },
+    { SCREEN_SHIPTYPE_INFO,    screen_shiptype_info    },
+    { SCREEN_MAIN,             screen_main             },
     { SCREEN_NONE,             NULL                    }
 };
 
@@ -174,6 +159,8 @@ void ui_game_loop(void)
         for (i = 0; _screens[i].id != SCREEN_NONE; i++) {
             if (_screens[i].id == _cur_screen) {
                 kprintf("ui_game_loop: running screen %d", (int)_cur_screen);
+                gfx_reset();
+                ui_clear_screen();
                 _screens[i].fn();
                 break;
             }
@@ -237,7 +224,7 @@ extern Boolean BuyShipFormHandleEvent(EventPtr ep);
 extern Boolean BuyEquipmentFormHandleEvent(EventPtr ep);
 extern Boolean SellEquipmentFormHandleEvent(EventPtr ep);
 extern Boolean BankFormHandleEvent(EventPtr ep);
-extern Boolean CmdrStatusFormHandleEvent(EventPtr ep);
+extern Boolean CommanderStatusFormHandleEvent(EventPtr ep);
 extern Boolean CurrentShipFormHandleEvent(EventPtr ep);
 extern Boolean QuestsFormHandleEvent(EventPtr ep);
 extern Boolean AveragePricesFormHandleEvent(EventPtr ep);
@@ -271,6 +258,7 @@ typedef Boolean (*form_handler_t)(EventPtr ep);
 static void deliver_open(form_handler_t handler, int formID)
 {
     EventType ev;
+    ui_labels_clear();
     memset(&ev, 0, sizeof(ev));
     ev.eType = frmLoadEvent;
     ev.data.frmLoad.formID = (u16)formID;
@@ -284,18 +272,6 @@ static void deliver_open(form_handler_t handler, int formID)
 }
 
 /* Deliver a menu command as a menuEvent so DockedFormDoCommand is called */
-static void deliver_cmd(form_handler_t handler, int cmd)
-{
-    /* menuEvent must go through AppHandleEvent, which routes it to
-     * DockedFormDoCommand. The form handler does NOT handle menuEvent. */
-    EventType ev;
-    (void)handler;
-    extern Boolean AppHandleEvent(EventType* ep);
-    memset(&ev, 0, sizeof(ev));
-    ev.eType = menuEvent;
-    ev.data.menu.itemID = (u16)cmd;
-    AppHandleEvent(&ev);
-}
 
 /* Deliver a button press as a ctlSelectEvent */
 static void deliver_button(form_handler_t handler, int buttonID)
@@ -308,14 +284,118 @@ static void deliver_button(form_handler_t handler, int buttonID)
 }
 
 
+
+/* -----------------------------------------------------------------------
+ * MAIN MENU - the three original Palm menus (Command / Game / Help).
+ * Returns true when the chosen command navigated to another screen.
+ * --------------------------------------------------------------------- */
+typedef struct { const char* label; int cmd; } MenuItem;
+static const MenuItem _menu_command[] = {
+    { "Buy Cargo",          MenuCommandBuyCargo },
+    { "Sell Cargo",         MenuCommandSellCargo },
+    { "Ship Yard",          MenuCommandShipYard },
+    { "Buy Equipment",      MenuCommandBuyEquipment },
+    { "Sell Equipment",     MenuCommandSellEquipment },
+    { "Personnel Roster",   MenuCommandPersonnelRoster },
+    { "Bank",               MenuCommandBank },
+    { "System Information", MenuCommandSystemInformation },
+    { "Commander Status",   MenuCommandCommanderStatus },
+    { "Galactic Chart",     MenuCommandGalacticChart },
+    { "Short Range Chart",  MenuCommandShortRangeChart },
+    { NULL, 0 }
+};
+static const MenuItem _menu_game[] = {
+    { "New Game",           MenuGameNewGame },
+    { "Switch Game",        MenuGameSwitchGame },
+    { "Retire",             MenuGameRetire },
+    { "Options",            MenuGameOptions },
+    { "High Scores",        MenuGameHighScores },
+    { "Clear High Scores",  MenuGameClearHighScores },
+    { "Snapshot",           MenuGameSnapshot },
+    { NULL, 0 }
+};
+static const MenuItem _menu_help[] = {
+    { "Help Current Screen", MenuHelpHelpCurrentScreen },
+    { "Help On Menu",        MenuHelpHelpOnMenu },
+    { "How To Play",         MenuHelpHowToPlay },
+    { "Trading",             MenuHelpTrading },
+    { "Traveling",           MenuHelpTraveling },
+    { "Ship Equipment",      MenuHelpShipEquipment },
+    { "Skills",              MenuHelpSkills },
+    { "First Steps",         MenuHelpFirstSteps },
+    { "Acknowledgements",    MenuHelpAcknowledgements },
+    { "About",               MenuHelpAbout },
+    { NULL, 0 }
+};
+static const struct { const char* name; const MenuItem* items; } _menus[3] = {
+    { "Command", _menu_command }, { "Game", _menu_game }, { "Help", _menu_help }
+};
+
+/* The Palm version stored the running game whenever the application was
+ * left. A console is simply switched off, so store it at safe points. */
+void ui_autosave(void)
+{
+    extern Boolean SaveGame(int State);
+    if (NameCommander[0]) SaveGame(0);
+}
+
+Boolean ui_menu(void)
+{
+    static int m = 0, sel = 0;
+    int i, n;
+    extern Boolean AppHandleEvent(EventType* ep);
+
+    ui_autosave();
+
+    gfx_hide();
+    for (;;) {
+        const MenuItem* it = _menus[m].items;
+        for (n = 0; it[n].label; n++) ;
+        if (sel >= n) sel = n - 1;
+        ui_clear_body();
+        ui_title("MENU");
+        for (i = 0; i < 3; i++)
+            ui_printf((u8)(2 + i * 13), UI_BODY_TOP, i == m ? PAL_HILIGHT : PAL_DIM,
+                      i == m ? "[%s]" : " %s ", _menus[i].name);
+        ui_hline(UI_BODY_TOP + 1);
+        for (i = 0; i < n; i++)
+            ui_printf(2, (u8)(UI_BODY_TOP + 3 + i), i == sel ? PAL_HILIGHT : PAL_NORMAL,
+                      "%s%s", i == sel ? "> " : "  ", it[i].label);
+        ui_status("L/R=menu  UP/DN=item  A=select  B=close");
+        for (;;) {
+            u16 joy = wait_button();
+            if (joy & BTN_DOWN)  { sel = (sel + 1) % n; break; }
+            if (joy & BTN_UP)    { sel = (sel + n - 1) % n; break; }
+            if (joy & BTN_RIGHT) { m = (m + 1) % 3; sel = 0; break; }
+            if (joy & BTN_LEFT)  { m = (m + 2) % 3; sel = 0; break; }
+            if (joy & (BTN_B | BTN_START)) return false;
+            if (joy & BTN_A) {
+                EventType ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.eType = menuEvent;
+                ev.data.menu.itemID = (u16)it[sel].cmd;
+                AppHandleEvent(&ev);
+                if (_next_screen != SCREEN_NONE) return true;
+                if (m != 2) return false;
+                break;
+            }
+        }
+    }
+}
+
 /* -----------------------------------------------------------------------
  * SYSTEM INFORMATION SCREEN
  * Shows system stats. Buttons: Special, Mercenary, News, B=back
  * --------------------------------------------------------------------- */
 static void screen_system_info(void)
 {
+    static int last_sys = -1, last_days = -1;
     /* Deliver open to let SystemInformationFormHandleEvent add news events */
     deliver_open(SystemInformationFormHandleEvent, SystemInformationForm);
+    if (last_sys != COMMANDER.CurSystem || last_days != Days) {
+        last_sys = COMMANDER.CurSystem; last_days = Days;
+        ui_autosave();
+    }
 
     /* Draw our own clean version on top – all data from game globals */
     ui_clear_body();
@@ -361,90 +441,25 @@ static void screen_system_info(void)
             break;
         }
         if (joy & BTN_B) {
-            /* Docked action menu — cycle through options with B, confirm with A */
-            static const struct { const char* label; int cmd; } _menu[] = {
-                { "Buy Cargo",       MenuCommandBuyCargo },
-                { "Sell Cargo",      MenuCommandSellCargo },
-                { "Shipyard",        MenuCommandShipYard },
-                { "Buy Equipment",   MenuCommandBuyEquipment },
-                { "Sell Equipment",  MenuCommandSellEquipment },
-                { "Personnel",       MenuCommandPersonnelRoster },
-                { "Bank",            MenuCommandBank },
-                { "Galactic Chart",  MenuCommandGalacticChart },
-                { "Warp Chart",      MenuCommandShortRangeChart },
-                { "Cmdr Status",     MenuCommandCommanderStatus },
-                { "Quests/Cargo",    0 },
-                { "Save Game",       MenuGameSnapshot },
-                { "High Scores",     MenuGameHighScores },
-                { "New Game",        MenuGameNewGame },
-            };
-            static const int _NMENU = (int)(sizeof(_menu)/sizeof(_menu[0]));
-            int msel = 0;
-
-            /* Draw menu overlay */
-            #define _DRAW_MENU() do {                 int _mi;                 ui_clear_body();                 ui_title("DOCKED MENU");                 for (_mi = 0; _mi < _NMENU; _mi++) {                     ui_printf(0, UI_BODY_TOP + _mi,                         _mi == msel ? PAL_HILIGHT : PAL_NORMAL,                         " %s%s", _mi == msel ? "> " : "  ",                         _menu[_mi].label);                 }                 ui_status("UP/DN=item  A=select  B=cancel");             } while(0)
-
-            _DRAW_MENU();
-            Boolean menu_done = false;
-            while (!menu_done && _next_screen == SCREEN_NONE) {
-                u16 mjoy = wait_button();
-                if (mjoy & BTN_DOWN) { if (msel < _NMENU-1) msel++; _DRAW_MENU(); }
-                if (mjoy & BTN_UP)   { if (msel > 0) msel--;         _DRAW_MENU(); }
-                if (mjoy & BTN_B)    { menu_done = true; } /* cancel */
-                if (mjoy & BTN_A) {
-                    menu_done = true;
-                    if (_menu[msel].cmd == 0) {
-                        /* Quests/Cargo — show sub-menu */
-                        ui_goto_screen(SCREEN_QUESTS);
-                    } else {
-                        deliver_cmd(SystemInformationFormHandleEvent,
-                                    _menu[msel].cmd);
-                    }
-                }
-            }
-            #undef _DRAW_MENU
-            /* If a menu item set _next_screen, break immediately — don't
-             * re-enter wait_button() in the outer loop before checking it. */
-            if (_next_screen != SCREEN_NONE) break;
-            /* Cancelled — redraw system info and re-enter event loop */
-            deliver_open(SystemInformationFormHandleEvent, SystemInformationForm);
-            ui_clear_body();
-            ui_title(SolarSystemName[CURSYSTEM.NameIndex]);
-            ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL, "Tech   : %-14s", TechLevel[CURSYSTEM.TechLevel]);
-            ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "Govt   : %-14s", Politics[CURSYSTEM.Politics].Name);
-            ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL, "Police : %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPolice]);
-            ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL, "Pirates: %-14s", Activity[Politics[CURSYSTEM.Politics].StrengthPirates]);
-            ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL, "Size   : %-14s", SystemSize[CURSYSTEM.Size]);
-            ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL, "Res    : %-14s", SpecialResources[CURSYSTEM.SpecialResources]);
-            ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL, "Status : %-14s", Status[CURSYSTEM.Status]);
-            ui_printf(0, UI_BODY_TOP + 8, PAL_NORMAL, "Fuel   : %d/%d  Credits: %ld",
-                      (int)Ship.Fuel, (int)Shiptype[Ship.Type].FuelTanks, Credits);
-            ui_status("A=Warp  B=Menu  C=Status  S=News");
-            continue;  /* re-enter outer event loop */
+            CurForm = SystemInformationForm;
+            if (!ui_menu()) ui_goto_screen(SCREEN_SYSTEM_INFO);   /* redraw */
+            break;
         }
         if (joy & BTN_C) {
             ui_goto_screen(SCREEN_COMMANDER_STATUS);
             break;
         }
         if (joy & BTN_START) {
-            /* Pay for newspaper and go */
-            if (!AlreadyPaidForNewspaper) {
-                long cost = Difficulty + 1;
-                if (ToSpend() >= cost) {
-                    Credits -= cost;
-                    AlreadyPaidForNewspaper = true;
-                }
-            }
-            if (AlreadyPaidForNewspaper)
-                ui_goto_screen(SCREEN_NEWSPAPER);
+            deliver_button(SystemInformationFormHandleEvent, SystemInformationNewsButton);
+            if (_next_screen == SCREEN_NONE) ui_goto_screen(SCREEN_SYSTEM_INFO);
             break;
         }
         if ((joy & BTN_UP) && has_special) {
-            ui_goto_screen(SCREEN_SPECIAL_EVENT);
+            deliver_button(SystemInformationFormHandleEvent, SystemInformationSpecialButton);
             break;
         }
         if ((joy & BTN_DOWN) && has_merc) {
-            ui_goto_screen(SCREEN_PERSONNEL);
+            deliver_button(SystemInformationFormHandleEvent, SystemInformationMercenaryForHireButton);
             break;
         }
         if (_next_screen != SCREEN_NONE) break;
@@ -452,147 +467,63 @@ static void screen_system_info(void)
 }
 
 /* -----------------------------------------------------------------------
- * WARP SCREEN  (short-range chart)
- * Player selects destination with D-Pad, A to warp.
+ * WARP SCREEN  (short-range chart) - see ui_charts.c
  * --------------------------------------------------------------------- */
 static void screen_warp(void)
 {
-    int i, n = 0;
-    /* Build list of all systems except current */
-    int nearby[MAXSOLARSYSTEM];
-    long sqrdist[MAXSOLARSYSTEM];   /* pre-computed sqr distances for sort */
-    int  dist[MAXSOLARSYSTEM];      /* pre-computed real distances for display */
-    int fuel = GetFuel();
-
-    for (i = 0; i < MAXSOLARSYSTEM; i++) {
-        if (i != COMMANDER.CurSystem) {
-            nearby[n] = i;
-            sqrdist[n] = SqrDistance(CURSYSTEM, SolarSystem[i]);
-            dist[n]    = (int)RealDistance(CURSYSTEM, SolarSystem[i]);
-            n++;
-        }
-    }
-    /* Sort by sqr distance — same ordering as real distance, no sqrt needed */
-    int j, tmp; long stmp;
-    for (i = 1; i < n; i++) {
-        tmp  = nearby[i];
-        stmp = sqrdist[i];
-        j = i - 1;
-        int dtmp = dist[i];
-        while (j >= 0 && sqrdist[j] > stmp) {
-            nearby[j+1]  = nearby[j];
-            sqrdist[j+1] = sqrdist[j];
-            dist[j+1]    = dist[j];
-            j--;
-        }
-        nearby[j+1]  = tmp;
-        sqrdist[j+1] = stmp;
-        dist[j+1]    = dtmp;
-    }
-
-    int sel = 0;   /* index into nearby[] */
-    int top = 0;   /* scroll offset */
-    int vis = 10;  /* visible rows */
-
-    #define DRAW_WARP_LIST() do { \
-        ui_clear_body(); \
-        ui_title("WARP"); \
-        int _r; \
-        for (_r = 0; _r < vis && (top + _r) < n; _r++) { \
-            int _idx = top + _r; \
-            int _si  = nearby[_idx]; \
-            int _d   = dist[_idx]; \
-            int _pal = (_idx == sel) ? PAL_HILIGHT : \
-                       (_d <= fuel ? PAL_NORMAL : PAL_DIM); \
-            ui_printf(0, UI_BODY_TOP + _r, _pal, \
-                "%-14s %3d ly%s", \
-                SolarSystemName[SolarSystem[_si].NameIndex], _d, \
-                (_d <= fuel ? "" : " x")); \
-        } \
-        ui_status_fmt("A=Warp  B=Back  %d/%d systems", sel+1, n); \
-    } while(0)
-
-    DRAW_WARP_LIST();
-
-    for (;;) {
-        u16 joy = wait_button();
-
-        if (joy & BTN_DOWN) {
-            if (sel < n-1) { sel++; if (sel >= top+vis) top++; DRAW_WARP_LIST(); }
-        }
-        if (joy & BTN_UP) {
-            if (sel > 0) { sel--; if (sel < top) top--; DRAW_WARP_LIST(); }
-        }
-        if (joy & BTN_A) {
-            WarpSystem = nearby[sel];
-            /* Check APL screen option */
-            if (!AlwaysInfo && APLscreen &&
-                RealDistance(CURSYSTEM, SolarSystem[WarpSystem]) <= fuel &&
-                RealDistance(CURSYSTEM, SolarSystem[WarpSystem]) > 0)
-                ui_goto_screen(SCREEN_AVERAGE_PRICES);
-            else
-                ui_goto_screen(SCREEN_EXECUTE_WARP);
-            break;
-        }
-        if (joy & BTN_B) {
-            ui_goto_screen(SCREEN_SYSTEM_INFO);
-            break;
-        }
-        if (joy & BTN_START) {
-            ui_goto_screen(SCREEN_GALACTIC_CHART);
-            break;
-        }
-        if (_next_screen != SCREEN_NONE) break;
-    }
-    #undef DRAW_WARP_LIST
+    screen_warp_gfx();
 }
 
 /* -----------------------------------------------------------------------
  * EXECUTE WARP SCREEN
  * Shows destination info and asks confirmation.
  * --------------------------------------------------------------------- */
+static void _draw_execute_warp(void)
+{
+    Boolean wh = WormholeExists(COMMANDER.CurSystem, WarpSystem);
+    Boolean inrange = wh || RealDistance(CURSYSTEM, SolarSystem[WarpSystem]) <= GetFuel();
+    ui_clear_body();
+    ui_title("TARGET SYSTEM");
+    ui_printf(0, UI_BODY_TOP + 0, PAL_HILIGHT, "Name:          %s", ui_label(ExecuteWarpSystemNameLabel));
+    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL,  "Size:          %s", ui_label(ExecuteWarpSizeLabel));
+    ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL,  "Tech level:    %s", ui_label(ExecuteWarpTechLevelLabel));
+    ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL,  "Government:    %s", ui_label(ExecuteWarpGovernmentLabel));
+    ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL,  "Distance:      %s", ui_label(ExecuteWarpRangeLabel));
+    ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL,  "Police:        %s", ui_label(ExecuteWarpPoliceLabel));
+    ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL,  "Pirates:       %s", ui_label(ExecuteWarpPiratesLabel));
+    ui_printf(0, UI_BODY_TOP + 7, PAL_NORMAL,  "Current costs: %s", ui_label(ExecuteWarpCurrentCostsLabel));
+    if (!inrange)
+        ui_print(0, UI_BODY_TOP + 9, PAL_WARN, "This system is out of range.");
+    ui_printf(0, UI_BODY_TOP + 11, PAL_DIM, "Fuel: %d parsecs    Cash: %ld cr.", (int)GetFuel(), Credits);
+    ui_printf(0, UI_BODY_TOP + 13, PAL_DIM, "LEFT/RIGHT = other systems in range");
+    ui_printf(0, UI_BODY_TOP + 14, PAL_DIM, "UP = cost specification");
+    ui_status(inrange ? "A=Warp C=Avg prices B=Chart" : "B=Chart");
+}
+
+/* Drives the original ExecuteWarpFormHandleEvent, so DoWarp() runs with all
+ * its checks (debt, mercenaries, insurance, wormhole tax, fuel, interest). */
 static void screen_execute_warp(void)
 {
-        ui_clear_body();
-    ui_title("EXECUTE WARP");
-
-    int dest = WarpSystem;
-    int dist = RealDistance(CURSYSTEM, SolarSystem[dest]);
-    int fuel = GetFuel();
-
-    ui_printf(0, UI_BODY_TOP + 0, PAL_HILIGHT, "Destination: %s",
-              SolarSystemName[SolarSystem[dest].NameIndex]);
-    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL,  "Distance   : %d ly", dist);
-    ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL,  "Fuel       : %d / %d", (int)Ship.Fuel, fuel);
-    ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL,  "Tech level : %s",
-              TechLevel[SolarSystem[dest].TechLevel]);
-    ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL,  "Government : %s",
-              Politics[SolarSystem[dest].Politics].Name);
-
-    if (dist > fuel)
-        ui_printf(0, UI_BODY_TOP + 6, PAL_WARN, "NOT ENOUGH FUEL!");
-    else if (Debt > 0 && Credits < 0)
-        ui_printf(0, UI_BODY_TOP + 6, PAL_WARN, "Debt warning!");
-
-    ui_status("A=Warp!  B=Back");
-
+    deliver_open(ExecuteWarpFormHandleEvent, ExecuteWarpForm);
+    _draw_execute_warp();
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_A) {
-            if (dist > fuel) {
-                ui_alert("Not enough fuel for this trip.");
-                ui_goto_screen(SCREEN_WARP);
-            } else {
-                Travel();  /* sets CurForm via FrmGotoForm internally */
-                if (_next_screen == SCREEN_NONE)
-                    ui_goto_screen(SCREEN_SYSTEM_INFO);
-            }
-            break;
+        Boolean wh = WormholeExists(COMMANDER.CurSystem, WarpSystem);
+        Boolean inrange = wh || RealDistance(CURSYSTEM, SolarSystem[WarpSystem]) <= GetFuel();
+        int btn = 0;
+        if ((joy & BTN_A) && inrange) btn = ExecuteWarpWarpButton;
+        if ((joy & BTN_C) && inrange) btn = ExecuteWarpPricesButton;
+        if (joy & BTN_UP)    btn = ExecuteWarpSpecificationButton;
+        /* the Palm handler would index system -1 when nothing is in range */
+        if ((joy & BTN_LEFT) && NextSystemWithinRange(WarpSystem, true) >= 0)   btn = ExecuteWarpScrollBackButton;
+        if ((joy & BTN_RIGHT) && NextSystemWithinRange(WarpSystem, false) >= 0) btn = ExecuteWarpScrollFwdButton;
+        if (btn) {
+            deliver_button(ExecuteWarpFormHandleEvent, btn);
+            if (_next_screen != SCREEN_NONE) break;
+            deliver_open(ExecuteWarpFormHandleEvent, ExecuteWarpForm);
+            _draw_execute_warp();
         }
-        if (joy & BTN_B) {
-            ui_goto_screen(SCREEN_WARP);
-            break;
-        }
+        if (joy & BTN_B) { ui_goto_screen(SCREEN_WARP); break; }
         if (_next_screen != SCREEN_NONE) break;
     }
 }
@@ -603,51 +534,7 @@ static void screen_execute_warp(void)
  * --------------------------------------------------------------------- */
 static void screen_galactic_chart(void)
 {
-    int sel = COMMANDER.CurSystem;
-    int top = 0;
-    int vis = 10;
-    int n = MAXSOLARSYSTEM;
-
-    #define DRAW_GAL() do { \
-        ui_clear_body(); \
-        ui_title("GALACTIC CHART"); \
-        int _r; \
-        for (_r = 0; _r < vis && (top + _r) < n; _r++) { \
-            int _si = top + _r; \
-            int _dist = RealDistance(CURSYSTEM, SolarSystem[_si]); \
-            int _pal = (_si == sel) ? PAL_HILIGHT : \
-                       (SolarSystem[_si].Visited ? PAL_NORMAL : PAL_DIM); \
-            ui_printf(0, UI_BODY_TOP + _r, _pal, \
-                "%-14s %3dly T%d %s", \
-                SolarSystemName[SolarSystem[_si].NameIndex], \
-                _dist, SolarSystem[_si].TechLevel, \
-                SolarSystem[_si].Visited ? "" : "?"); \
-        } \
-        ui_status_fmt("A=Set dest  B=Back  %d/%d", sel+1, n); \
-    } while(0)
-
-    DRAW_GAL();
-
-    for (;;) {
-        u16 joy = wait_button();
-        if (joy & BTN_DOWN) {
-            if (sel < n-1) { sel++; if (sel >= top+vis) top++; DRAW_GAL(); }
-        }
-        if (joy & BTN_UP) {
-            if (sel > 0) { sel--; if (sel < top) top--; DRAW_GAL(); }
-        }
-        if (joy & BTN_A) {
-            WarpSystem = sel;
-            ui_goto_screen(SCREEN_EXECUTE_WARP);
-            break;
-        }
-        if (joy & BTN_B) {
-            ui_goto_screen(SCREEN_WARP);
-            break;
-        }
-        if (_next_screen != SCREEN_NONE) break;
-    }
-    #undef DRAW_GAL
+    screen_galactic_gfx();
 }
 
 /* -----------------------------------------------------------------------
@@ -656,315 +543,207 @@ static void screen_galactic_chart(void)
  * --------------------------------------------------------------------- */
 static void draw_cargo_list(int sel, int buying)
 {
+    int i;
     ui_clear_body();
     ui_title(buying ? "BUY CARGO" : "SELL CARGO");
-    int i;
+    ui_printf(0, UI_BODY_TOP, PAL_DIM, buying ? "   Item        Stock   Price"
+                                               : "   Item        Hold    Price");
     for (i = 0; i < MAXTRADEITEM; i++) {
-        int price  = buying ? BuyPrice[i]  : SellPrice[i];
-        int stock  = buying ? CURSYSTEM.Qty[i] : Ship.Cargo[i];
-        int pal = (i == sel) ? PAL_HILIGHT :
-                  (price > 0 && stock > 0 ? PAL_NORMAL : PAL_DIM);
-        if (price > 0)
-            ui_printf(0, UI_BODY_TOP + i, pal,
-                "%-12s %4dcr x%d",
-                Tradeitem[i].Name, price, stock);
-        else
-            ui_printf(0, UI_BODY_TOP + i, PAL_DIM,
-                "%-12s  n/a", Tradeitem[i].Name);
+        int row = UI_BODY_TOP + 2 + i;
+        const char* mark = (i == sel) ? ">" : " ";
+        if (buying) {
+            if (BuyPrice[i] > 0)
+                ui_printf(0, row, i == sel ? PAL_HILIGHT : PAL_NORMAL, "%s  %-12s %3d   %5ld cr.",
+                          mark, Tradeitem[i].Name, (int)CURSYSTEM.Qty[i], (long)BuyPrice[i]);
+            else
+                ui_printf(0, row, i == sel ? PAL_HILIGHT : PAL_DIM, "%s  %-12s       not sold",
+                          mark, Tradeitem[i].Name);
+        } else {
+            /* like the Palm form: '!' marks items you would sell at a profit */
+            int profit = Ship.Cargo[i] > 0 && SellPrice[i] > 0 &&
+                         BuyingPrice[i] / Ship.Cargo[i] < SellPrice[i];
+            if (SellPrice[i] > 0)
+                ui_printf(0, row, i == sel ? PAL_HILIGHT : (Ship.Cargo[i] > 0 ? PAL_NORMAL : PAL_DIM),
+                          "%s%s %-12s %3d   %5ld cr.", mark, profit ? "!" : " ",
+                          Tradeitem[i].Name, (int)Ship.Cargo[i], (long)SellPrice[i]);
+            else
+                ui_printf(0, row, i == sel ? PAL_HILIGHT : PAL_DIM, "%s  %-12s %3d   no trade%s",
+                          mark, Tradeitem[i].Name, (int)Ship.Cargo[i],
+                          Ship.Cargo[i] > 0 ? " (dump)" : "");
+        }
     }
-    int free_bays = TotalCargoBays() - FilledCargoBays();
-    ui_printf(0, UI_BODY_TOP + MAXTRADEITEM + 1, PAL_DIM,
-        "Bays free: %d   Credits: %ld", free_bays, Credits);
-    ui_status("UP/DN=item  A=buy qty  C=buy all  B=back");
+    ui_printf(0, UI_BODY_TOP + MAXTRADEITEM + 4, PAL_NORMAL, "Bays: %d/%d     Cash: %ld cr.",
+              FilledCargoBays(), TotalCargoBays(), Credits);
+    ui_status(buying ? "A=Buy  C=Buy max  B=Back  START=Menu"
+                     : "A=Sell/Dump C=Sell all B=Back START=Menu");
 }
 
-static void screen_buy_cargo(void)
+/* Both screens drive the original Cargo.c form handlers. */
+static void _trade_screen(int buying)
 {
-    /* Ensure prices are current */
-    DeterminePrices(COMMANDER.CurSystem);
-
+    form_handler_t h = buying ? BuyCargoFormHandleEvent : SellCargoFormHandleEvent;
     int sel = 0;
-    draw_cargo_list(sel, 1);
+    deliver_open(h, buying ? BuyCargoForm : SellCargoForm);
+    draw_cargo_list(sel, buying);
 
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_DOWN) { if (sel < MAXTRADEITEM-1) sel++; draw_cargo_list(sel, 1); }
-        if (joy & BTN_UP)   { if (sel > 0) sel--;              draw_cargo_list(sel, 1); }
+        if (joy & BTN_DOWN) { sel = (sel + 1) % MAXTRADEITEM; draw_cargo_list(sel, buying); }
+        if (joy & BTN_UP)   { sel = (sel + MAXTRADEITEM - 1) % MAXTRADEITEM; draw_cargo_list(sel, buying); }
         if (joy & BTN_A) {
-            if (BuyPrice[sel] <= 0) {
-                ui_alert("This item is not available here.");
-            } else {
-                int max_can_buy = min(CURSYSTEM.Qty[sel],
-                    min(TotalCargoBays() - FilledCargoBays(),
-                        (int)(Credits / BuyPrice[sel])));
-                if (max_can_buy <= 0) {
-                    ui_alert("You cannot afford any or no space.");
-                } else {
-                    int qty = _ask_qty("BUY CARGO", Tradeitem[sel].Name,
-                                              max_can_buy, BuyPrice[sel]);
-                    if (qty > 0) {
-                        BuyCargo(sel, qty, true);
-                    }
-                    draw_cargo_list(sel, 1);
-                }
-            }
+            if (buying) deliver_button(h, BuyCargoQty0Button + sel);
+            else deliver_button(h, (SellPrice[sel] > 0 ? SellCargoQty0Button : SellCargoDump0Button) + sel);
+            draw_cargo_list(sel, buying);
         }
         if (joy & BTN_C) {
-            if (BuyPrice[sel] > 0)
-                BuyCargo(sel, 999, true);
-            draw_cargo_list(sel, 1);
+            if (buying) deliver_button(h, BuyCargoAll0Button + sel);
+            else if (SellPrice[sel] > 0) deliver_button(h, SellCargoAll0Button + sel);
+            else deliver_button(h, SellCargoDump0Button + sel);
+            draw_cargo_list(sel, buying);
         }
         if (joy & BTN_B) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
+        if (joy & BTN_START) {
+            CurForm = buying ? BuyCargoForm : SellCargoForm;
+            if (ui_menu()) break;
+            draw_cargo_list(sel, buying);
+        }
         if (_next_screen != SCREEN_NONE) break;
     }
 }
 
-/* -----------------------------------------------------------------------
- * SELL CARGO SCREEN
- * --------------------------------------------------------------------- */
-static void screen_sell_cargo(void)
-{
-    DeterminePrices(COMMANDER.CurSystem);
-
-    int sel = 0;
-    draw_cargo_list(sel, 0);
-
-    for (;;) {
-        u16 joy = wait_button();
-        if (joy & BTN_DOWN) { if (sel < MAXTRADEITEM-1) sel++; draw_cargo_list(sel, 0); }
-        if (joy & BTN_UP)   { if (sel > 0) sel--;              draw_cargo_list(sel, 0); }
-        if (joy & BTN_A) {
-            if (Ship.Cargo[sel] <= 0) {
-                ui_alert("You don't have any of this.");
-            } else if (SellPrice[sel] <= 0) {
-                /* Dump it */
-                int qty = _ask_qty("DUMP CARGO", Tradeitem[sel].Name,
-                                          Ship.Cargo[sel], 0);
-                if (qty > 0)
-                    SellCargo(sel, qty, DUMPCARGO);
-                draw_cargo_list(sel, 0);
-            } else {
-                int qty = _ask_qty("SELL CARGO", Tradeitem[sel].Name,
-                                          Ship.Cargo[sel], SellPrice[sel]);
-                if (qty > 0)
-                    SellCargo(sel, qty, SELLCARGO);
-                draw_cargo_list(sel, 0);
-            }
-        }
-        if (joy & BTN_C) {
-            if (Ship.Cargo[sel] > 0) {
-                if (SellPrice[sel] > 0)
-                    SellCargo(sel, 999, SELLCARGO);
-                else
-                    SellCargo(sel, 999, DUMPCARGO);
-                draw_cargo_list(sel, 0);
-            }
-        }
-        if (joy & BTN_B) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
-        if (_next_screen != SCREEN_NONE) break;
-    }
-}
+static void screen_buy_cargo(void)  { _trade_screen(1); }
+static void screen_sell_cargo(void) { _trade_screen(0); }
 
 /* -----------------------------------------------------------------------
  * DISCARD CARGO SCREEN (used during plunder - dump your own cargo)
  * --------------------------------------------------------------------- */
 static void screen_discard_cargo(void)
 {
-    int sel = 0;
-    draw_cargo_list(sel, 0);
-
-    for (;;) {
-        u16 joy = wait_button();
-        if (joy & BTN_DOWN) { if (sel < MAXTRADEITEM-1) sel++; draw_cargo_list(sel, 0); }
-        if (joy & BTN_UP)   { if (sel > 0) sel--;              draw_cargo_list(sel, 0); }
-        if (joy & BTN_A) {
-            if (Ship.Cargo[sel] <= 0) {
-                ui_alert("Nothing to dump.");
-            } else {
-                int qty = _ask_qty("DUMP", Tradeitem[sel].Name,
-                                          Ship.Cargo[sel], 0);
-                if (qty > 0)
-                    SellCargo(sel, qty, DUMPCARGO);
-                draw_cargo_list(sel, 0);
-            }
-        }
-        if (joy & BTN_C) {
-            if (Ship.Cargo[sel] > 0) {
-                SellCargo(sel, 999, DUMPCARGO);
-                draw_cargo_list(sel, 0);
-            }
-        }
-        if (joy & BTN_B) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
-        if (_next_screen != SCREEN_NONE) break;
-    }
+    /* the Dump Cargo form is modal (see GEN_FrmDoDialog); never a screen */
+    ui_goto_screen(SCREEN_SYSTEM_INFO);
 }
 
 /* -----------------------------------------------------------------------
  * BANK SCREEN
  * --------------------------------------------------------------------- */
+extern Boolean BankFormHandleEvent(EventPtr ep);
+extern Boolean ShipYardFormHandleEvent(EventPtr ep);
+extern Boolean ExecuteWarpFormHandleEvent(EventPtr ep);
 static void draw_bank(void)
 {
-#define _MAXLOAN() (PoliceRecordScore >= CLEANSCORE ? min(25000L, max(1000L, ((CurrentWorth()/10L)/500L)*500L)) : 500L)
     ui_clear_body();
     ui_title("BANK");
-    ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL,  "Credits    : %ld cr", Credits);
-    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL,  "Debt       : %ld cr", Debt);
-    ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL,  "Max loan   : %ld cr", _MAXLOAN());
-    ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL,  "Ship value : %ld cr", CurrentShipPriceWithoutCargo(true));
-    ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL,  "Insurance  : %s", Insurance ? "YES" : "NO");
-    if (Insurance) {
-        ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL, "No-claim   : %d%%", min((int)NoClaim, 90));
-        ui_printf(0, UI_BODY_TOP + 7, PAL_NORMAL, "Premium    : %ld cr/day", InsuranceMoney());
-    }
-    ui_printf(0, UI_BODY_TOP + 9, PAL_DIM,
-        "A=Loan  B=Repay  C=Insurance  St=Back");
+    ui_print(0, UI_BODY_TOP + 0, PAL_TITLE, "Loan");
+    ui_printf(1, UI_BODY_TOP + 1, PAL_NORMAL, "Current debt:    %s", ui_capture_at(32));
+    ui_printf(1, UI_BODY_TOP + 2, PAL_NORMAL, "Maximum loan:    %s", ui_capture_at(46));
+    ui_print(0, UI_BODY_TOP + 5, PAL_TITLE, "Insurance");
+    ui_printf(1, UI_BODY_TOP + 6, PAL_NORMAL, "Ship value:      %s", ui_capture_at(100));
+    ui_printf(1, UI_BODY_TOP + 7, PAL_NORMAL, "No-claim:        %s", ui_capture_at(114));
+    ui_printf(1, UI_BODY_TOP + 8, PAL_NORMAL, "Costs:           %s", ui_capture_at(128));
+    ui_printf(1, UI_BODY_TOP + 9, PAL_NORMAL, "Insured:         %s", Insurance ? "yes" : "no");
+    ui_printf(0, UI_BODY_TOP + 12, PAL_NORMAL, "Cash: %ld cr.", Credits);
+    ui_printf(0, UI_BODY_TOP + 15, PAL_DIM, "A = Get loan");
+    ui_printf(0, UI_BODY_TOP + 16, PAL_DIM, "C = Pay back loan");
+    ui_printf(0, UI_BODY_TOP + 17, PAL_DIM, "UP = %s insurance", Insurance ? "Stop" : "Buy");
+    ui_status("A=Loan C=Pay back UP=Insur. B=Back");
 }
 
+/* Drives the original Bank.c handler (loan limits, insurance rules). */
 static void screen_bank(void)
 {
+    ui_capture(2);
+    deliver_open(BankFormHandleEvent, BankForm);
     draw_bank();
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_A) {
-            /* Get loan */
-            if (Debt >= _MAXLOAN()) {
-                ui_alert("Your debt is already at maximum.");
-            } else {
-                long avail = _MAXLOAN() - Debt;
-                char title[32];
-                snprintf(title, sizeof(title), "Loan (max %ld cr)", avail);
-                int amt = _ask_qty(title, "credits", (int)avail, 0);
-                if (amt > 0) {
-                    Debt += amt;
-                    Credits += amt;
-                }
-            }
+        int btn = 0;
+        if (joy & BTN_A) btn = BankGetLoanButton;
+        if (joy & BTN_C) btn = BankPayBackButton;
+        if (joy & BTN_UP) btn = Insurance ? BankStopInsuranceButton : BankBuyInsuranceButton;
+        if (btn) {
+            deliver_button(BankFormHandleEvent, btn);
+            deliver_open(BankFormHandleEvent, BankForm);
             draw_bank();
-        }
-        if (joy & BTN_B) {
-            /* Repay loan */
-            if (Debt <= 0) {
-                ui_alert("You have no debt.");
-            } else {
-                long can_pay = min(Debt, Credits);
-                if (can_pay <= 0) {
-                    ui_alert("You have no credits to repay with.");
-                } else {
-                    int amt = _ask_qty("REPAY", "credits", (int)can_pay, 0);
-                    if (amt > 0) {
-                        long pay = min((long)amt, min(Debt, Credits));
-                        Credits -= pay;
-                        Debt -= pay;
-                    }
-                }
-            }
-            draw_bank();
-        }
-        if (joy & BTN_C) {
-            /* Toggle insurance */
-            if (!Insurance) {
-                if (!EscapePod) {
-                    ui_alert("You need an escape pod first.");
-                } else {
-                    Insurance = true;
-                }
-            } else {
-                if (ui_confirm("Cancel insurance?")) {
-                    Insurance = false;
-                    NoClaim = 0;
-                }
-            }
-            draw_bank();
-        }
-        if (joy & BTN_START) {
-            ui_goto_screen(SCREEN_SYSTEM_INFO);
-            break;
         }
         if (joy & BTN_B) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
+        if (joy & BTN_START) {
+            CurForm = BankForm;
+            if (ui_menu()) break;
+            draw_bank();
+        }
         if (_next_screen != SCREEN_NONE) break;
     }
+    ui_capture(0);
 }
 
 /* -----------------------------------------------------------------------
- * SHIPYARD SCREEN
+ * SHIPYARD SCREEN - drives the original Shipyard.c handler; the four
+ * status lines are the very strings ShowShipYard() draws.
  * --------------------------------------------------------------------- */
-static void draw_shipyard(void)
+typedef struct { const char* label; int btn; ScreenID scr; } YardAct;
+static YardAct _yard[8];
+static int _yard_n;
+
+static void draw_shipyard(int sel)
 {
+    int i;
+    Boolean ships = CURSYSTEM.TechLevel >= Shiptype[0].MinTechLevel;
+    _yard_n = 0;
+    #define YA(l,b,sc) do { _yard[_yard_n].label=(l); _yard[_yard_n].btn=(b); _yard[_yard_n].scr=(sc); _yard_n++; } while(0)
+    if (GetFuel() < GetFuelTanks()) { YA("Buy fuel", ShipYardBuyFuelButton, SCREEN_NONE); YA("Full tank", ShipYardFullTankButton, SCREEN_NONE); }
+    if (Ship.Hull < GetHullStrength()) { YA("Repair", ShipYardRepairButton, SCREEN_NONE); YA("Full repairs", ShipYardFullRepairsButton, SCREEN_NONE); }
+    YA(ships ? "Buy new ship" : "Ship information", ships ? ShipYardBuyNewShipButton : ShipYardShipInformationButton, SCREEN_NONE);
+    if (!(EscapePod || ToSpend() < 2000 || !ships)) YA("Buy escape pod", ShipYardEscapePodButton, SCREEN_NONE);
+    YA("Buy equipment", 0, SCREEN_BUY_EQUIPMENT);
+    YA("Sell equipment", 0, SCREEN_SELL_EQUIPMENT);
+    #undef YA
+
     ui_clear_body();
-    ui_title("SHIPYARD");
-    ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL, "Ship    : %-16s", Shiptype[Ship.Type].Name);
-    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "Hull    : %d / %d",
-              (int)Ship.Hull, (int)Shiptype[Ship.Type].HullStrength);
-    ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL, "Fuel    : %d / %d",
-              (int)Ship.Fuel, (int)Shiptype[Ship.Type].FuelTanks);
-    ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL, "Cargo   : %d / %d bays",
-              FilledCargoBays(), TotalCargoBays());
-    ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL, "Credits : %ld cr", Credits);
-
-    long repair_cost = (Shiptype[Ship.Type].HullStrength - Ship.Hull) * Shiptype[Ship.Type].RepairCosts;
-    long fuel_cost   = (Shiptype[Ship.Type].FuelTanks - Ship.Fuel) * Shiptype[Ship.Type].CostOfFuel;
-    ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL, "Repair  : %ld cr", repair_cost);
-    ui_printf(0, UI_BODY_TOP + 7, PAL_NORMAL, "Fuel up : %ld cr", fuel_cost);
-
-    ui_printf(0, UI_BODY_TOP + 9, PAL_DIM,
-        "A=Repair  B=Fuel  C=Buy ship  U=Buy equip  D=Sell equip  St=Back");
+    ui_title("SHIP YARD");
+    ui_print(0, UI_BODY_TOP + 0, PAL_NORMAL, ui_capture_at(18));
+    ui_print(0, UI_BODY_TOP + 1, PAL_NORMAL, ui_capture_at(30));
+    ui_print(0, UI_BODY_TOP + 3, PAL_NORMAL, ui_capture_at(60));
+    ui_print(0, UI_BODY_TOP + 4, PAL_NORMAL, ui_capture_at(72));
+    ui_print(0, UI_BODY_TOP + 6, PAL_NORMAL, ui_capture_at(102));
+    ui_print(0, UI_BODY_TOP + 8, PAL_NORMAL, ui_capture_at(132));
+    ui_printf(0, UI_BODY_TOP + 10, PAL_NORMAL, "Cash: %ld cr.", Credits);
+    for (i = 0; i < _yard_n; i++)
+        ui_printf(2, (u8)(UI_BODY_TOP + 13 + i), i == sel ? PAL_HILIGHT : PAL_NORMAL,
+                  "%s%s", i == sel ? "> " : "  ", _yard[i].label);
+    ui_status("UP/DN=choose  A=select  B=Back");
 }
 
 static void screen_shipyard(void)
 {
-    draw_shipyard();
+    int sel = 0;
+    ui_capture(2);
+    deliver_open(ShipYardFormHandleEvent, ShipYardForm);
+    draw_shipyard(sel);
     for (;;) {
         u16 joy = wait_button();
+        if (joy & BTN_DOWN) { sel = (sel + 1) % _yard_n; draw_shipyard(sel); }
+        if (joy & BTN_UP)   { sel = (sel + _yard_n - 1) % _yard_n; draw_shipyard(sel); }
         if (joy & BTN_A) {
-            /* Full repair */
-            long cost = (Shiptype[Ship.Type].HullStrength - Ship.Hull) *
-                        Shiptype[Ship.Type].RepairCosts;
-            if (cost <= 0) {
-                ui_alert("Hull is already at full strength.");
-            } else if (Credits < cost) {
-                ui_alert("Not enough credits for full repair.");
+            if (_yard[sel].btn) {
+                deliver_button(ShipYardFormHandleEvent, _yard[sel].btn);
+                if (_next_screen != SCREEN_NONE) break;
+                deliver_open(ShipYardFormHandleEvent, ShipYardForm);
+                draw_shipyard(sel);
+                if (sel >= _yard_n) { sel = 0; draw_shipyard(sel); }
             } else {
-                if (ui_confirm("Repair hull to full strength?")) {
-                    Credits -= cost;
-                    Ship.Hull = Shiptype[Ship.Type].HullStrength;
-                }
+                ui_goto_screen(_yard[sel].scr);
+                break;
             }
-            draw_shipyard();
         }
-        if (joy & BTN_B) {
-            /* Full fuel */
-            long cost = (Shiptype[Ship.Type].FuelTanks - Ship.Fuel) *
-                        Shiptype[Ship.Type].CostOfFuel;
-            if (cost <= 0) {
-                ui_alert("Fuel tanks are already full.");
-            } else if (Credits < cost) {
-                ui_alert("Not enough credits for full fuel.");
-            } else {
-                if (ui_confirm("Fill up fuel tanks?")) {
-                    Credits -= cost;
-                    Ship.Fuel = Shiptype[Ship.Type].FuelTanks;
-                }
-            }
-            draw_shipyard();
-        }
-        if (joy & BTN_C) {
-            ui_goto_screen(SCREEN_BUY_SHIP);
-            break;
-        }
-        if (joy & BTN_UP) {
-            ui_goto_screen(SCREEN_BUY_EQUIPMENT);
-            break;
-        }
-        if (joy & BTN_DOWN) {
-            ui_goto_screen(SCREEN_SELL_EQUIPMENT);
-            break;
-        }
+        if (joy & BTN_B) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
         if (joy & BTN_START) {
-            ui_goto_screen(SCREEN_SYSTEM_INFO);
-            break;
+            CurForm = ShipYardForm;
+            if (ui_menu()) break;
+            draw_shipyard(sel);
         }
         if (_next_screen != SCREEN_NONE) break;
     }
+    ui_capture(0);
 }
 
 /* -----------------------------------------------------------------------
@@ -1051,182 +830,162 @@ static void _enc_status(void)
     ui_print(0, UI_STATUS_ROW, PAL_STATUS, buf);
 }
 
+static void _draw_encounter(void);
+
+/* --- encounter graphics state ------------------------------------------ */
+#define ENC_T_PLAYER   GFX_TILE_BASE
+#define ENC_T_OPP      (GFX_TILE_BASE + 208)
+#define ENC_T_ICON     (GFX_TILE_BASE + 416)
+#define ENC_T_ATTACK   (GFX_TILE_BASE + 425)     /* 2 x 9 tiles */
+#define ENC_T_TRIBBLE  (GFX_TILE_BASE + 443)     /* 4 tiles */
+static long _enc_cache[2][3];                    /* type, hull, shield */
+static s8   _enc_icon;
+
+static void _enc_gfx_init(void)
+{
+    u32 t[32];
+    u16 x, y;
+    _enc_cache[0][0] = _enc_cache[1][0] = -1;
+    _enc_icon = -2;
+    gfx_set_pal(PAL0, gfx_icon_pal);
+    gfx_icon2x(ENC_T_ATTACK, &gfx_icon[IC_ATTACK], 3, 3);
+    gfx_icon2x(ENC_T_ATTACK + 9, &gfx_icon[IC_ATTACK2], 3, 3);
+    /* tribble: the Palm form used 12x12 framed buttons labelled ".." */
+    memset(t, 0, sizeof(t));
+    for (y = 2; y < 14; y++)
+        for (x = 2; x < 14; x++) {
+            bool corner = (x == 2 || x == 13) && (y == 2 || y == 13);
+            bool edge = x == 2 || x == 13 || y == 2 || y == 13;
+            bool eye = (y == 8 || y == 9) && (x == 5 || x == 6 || x == 9 || x == 10);
+            if (!corner && (edge || eye))
+                t[((y >> 3) * 2 + (x >> 3)) * 8 + (y & 7)] |= 0xF0000000UL >> ((x & 7) * 4);
+        }
+    VDP_loadTileData(t, ENC_T_TRIBBLE, 4, CPU);
+}
+
+static void _enc_ship(int who, SHIP* sh, long hullmax, u16 tile, u16 pal, u16 col)
+{
+    long shmax = (sh->Shield[0] < 0) ? 0 : TotalShields(sh);
+    long shcur = shmax > 0 ? TotalShieldStrength(sh) : 0;
+    if (_enc_cache[who][0] != sh->Type || _enc_cache[who][1] != sh->Hull ||
+        _enc_cache[who][2] != shcur) {
+        gfx_set_pal(pal, gfx_ship_pal[sh->Type]);
+        gfx_ship_draw(tile, sh->Type, sh->Hull, hullmax, shcur, shmax);
+        _enc_cache[who][0] = sh->Type; _enc_cache[who][1] = sh->Hull; _enc_cache[who][2] = shcur;
+    }
+    gfx_place(pal, tile, col, 4, 16, 13);
+}
+
+static void _enc_stats(SHIP* sh, long hullmax, u8 col, u8 pal)
+{
+    long ts = TotalShields(sh);
+    int hp = (int)(hullmax > 0 ? (sh->Hull * 100) / hullmax : 0);
+    int sp = (int)(ts > 0 ? (TotalShieldStrength(sh) * 100) / ts : 0);
+    if (TextualEncounters) {
+        ui_printf(col, 6, pal, "%s", Shiptype[sh->Type].Name);
+        ui_printf(col, 8, pal, "Hull at %d%c", hp, '%');
+        if (sh->Shield[0] < 0) ui_print(col, 10, pal, "No shields");
+        else ui_printf(col, 10, pal, "Shields at %d%c", sp, '%');
+    } else {
+        ui_printf(col, 17, pal, "%s", Shiptype[sh->Type].Name);
+        if (sh->Shield[0] < 0) ui_printf(col, 18, pal, "Hull %d%c", hp, '%');
+        else ui_printf(col, 18, pal, "Hull %d%c Shld %d%c", hp, '%', sp, '%');
+    }
+}
+
+static void _enc_gfx(void)
+{
+    int icon = -1, i;
+
+    ui_print(2, 3, PAL_HILIGHT, "You");
+    ui_print(22, 3, PAL_TITLE, "Opponent");
+    _enc_stats(&Ship, GetHullStrength(), 2, PAL_HILIGHT);
+    _enc_stats(&Opponent, Shiptype[Opponent.Type].HullStrength, 22, PAL_TITLE);
+    if (!TextualEncounters) {
+        _enc_ship(0, &Ship, GetHullStrength(), ENC_T_PLAYER, PAL1, 2);
+        _enc_ship(1, &Opponent, Shiptype[Opponent.Type].HullStrength, ENC_T_OPP, PAL2, 22);
+    }
+
+    if (ENCOUNTERPIRATE(EncounterType)) icon = (Opponent.Type == MANTISTYPE) ? IC_ALIEN : IC_PIRATE;
+    else if (ENCOUNTERPOLICE(EncounterType)) icon = IC_POLICE;
+    else if (ENCOUNTERTRADER(EncounterType)) icon = IC_TRADER;
+    else if (EncounterType == CAPTAINHUIEENCOUNTER || EncounterType == MARIECELESTEENCOUNTER ||
+             EncounterType == CAPTAINAHABENCOUNTER || EncounterType == CAPTAINCONRADENCOUNTER)
+        icon = IC_SPECIAL;
+    if (icon >= 0 && !TextualEncounters) {
+        if (icon != _enc_icon) { gfx_icon2x(ENC_T_ICON, &gfx_icon[icon], 3, 3); _enc_icon = (s8)icon; }
+        gfx_place(PAL0, ENC_T_ICON, 37, 1, 3, 3);
+    }
+    if (ui_attack_icon)
+        gfx_place(PAL0, (u16)(ENC_T_ATTACK + (ui_attack_icon - 1) * 9), 37, 24, 3, 3);
+
+    /* tribbles crawling over the screen (plane A, yellow) */
+    for (i = 0; i < TRIBBLESONSCREEN; i++)
+        if (ui_tribbles & (1UL << i))
+            VDP_fillTileMapRectInc(BG_A, TILE_ATTR_FULL(PAL1, 1, 0, 0, ENC_T_TRIBBLE),
+                                   (u16)(gfx_tribble_pos[i][0] / 4),
+                                   (u16)(2 + (gfx_tribble_pos[i][1] * 3) / 20), 2, 2);
+}
+
 /* -----------------------------------------------------------------------
- * Encounter screen renderer
- * Displays: encounter description, opponent & player ship stats, status.
- * Called on first open and after each combat round (nilEvent/button).
+ * Encounter screen renderer: ships (original bitmaps with damage/shield
+ * split exactly like the Palm ShowShip), encounter icon, and the narration
+ * text Encounter.c draws with DrawChars (captured in ui_extra.c).
  * --------------------------------------------------------------------- */
 static void _draw_encounter(void)
 {
-    int opp_hull_pct, opp_shld_pct, my_hull_pct, my_shld_pct;
-    char opp_shld_buf[12], my_shld_buf[12];
-
-    /* Opponent hull% */
-    opp_hull_pct = Shiptype[Opponent.Type].HullStrength > 0
-        ? (int)((Opponent.Hull * 100) / Shiptype[Opponent.Type].HullStrength)
-        : 0;
-
-    /* Opponent shields */
-    {
-        long ts = TotalShields(&Opponent);
-        long ss = TotalShieldStrength(&Opponent);
-        if (ts <= 0)
-            snprintf(opp_shld_buf, sizeof(opp_shld_buf), "none");
-        else
-            snprintf(opp_shld_buf, sizeof(opp_shld_buf), "%ld%%",
-                (ss * 100) / ts);
-    }
-
-    /* Player hull% */
-    my_hull_pct = GetHullStrength() > 0
-        ? (int)((Ship.Hull * 100) / GetHullStrength())
-        : 0;
-
-    /* Player shields */
-    {
-        long ts = TotalShields(&Ship);
-        if (ts <= 0)
-            snprintf(my_shld_buf, sizeof(my_shld_buf), "none");
-        else
-            snprintf(my_shld_buf, sizeof(my_shld_buf), "%ld%%",
-                (TotalShieldStrength(&Ship) * 100) / ts);
-    }
-
+    const char* t = "ENCOUNTER";
+    gfx_hide();
     ui_clear_body();
-
-    /* Row 0: title */
-    {
-        const char* t = "ENCOUNTER";
-        if (ENCOUNTERPOLICE(EncounterType))          t = "POLICE";
-        else if (ENCOUNTERPIRATE(EncounterType))     t = "PIRATE";
-        else if (ENCOUNTERTRADER(EncounterType))     t = "TRADER";
-        else if (ENCOUNTERMONSTER(EncounterType))    t = "SPACE MONSTER";
-        else if (EncounterType == DRAGONFLYATTACK ||
-                 EncounterType == DRAGONFLYIGNORE)   t = "DRAGONFLY";
-        else if (EncounterType == SCARABATTACK ||
-                 EncounterType == SCARABIGNORE)      t = "SCARAB";
-        else if (EncounterType == MARIECELESTEENCOUNTER) t = "MARIE CELESTE";
-        else if (EncounterType == CAPTAINAHABENCOUNTER ||
-                 EncounterType == CAPTAINCONRADENCOUNTER ||
-                 EncounterType == CAPTAINHUIEENCOUNTER)  t = "FAMOUS CAPTAIN";
-        else if (EncounterType == BOTTLEOLDENCOUNTER ||
-                 EncounterType == BOTTLEGOODENCOUNTER)   t = "FLOATING BOTTLE";
-        ui_title(t);
-    }
-
-    /* Row 2-3: location + encounter description */
-    ui_printf(0, UI_BODY_TOP + 0, PAL_NORMAL,
-        "%d click%s from %s:", Clicks, Clicks==1?"":"s",
-        SolarSystemName[SolarSystem[WarpSystem].NameIndex]);
-
-    {
-        char desc[UI_COLS + 1];
-        if (EncounterType == POSTMARIEPOLICEENCOUNTER)
-            snprintf(desc, sizeof(desc), "Customs Police demand your goods.");
-        else if (EncounterType == MARIECELESTEENCOUNTER)
-            snprintf(desc, sizeof(desc), "A drifting ship.");
-        else if (EncounterType == CAPTAINAHABENCOUNTER)
-            snprintf(desc, sizeof(desc), "Captain Ahab!");
-        else if (EncounterType == CAPTAINCONRADENCOUNTER)
-            snprintf(desc, sizeof(desc), "Captain Conrad!");
-        else if (EncounterType == CAPTAINHUIEENCOUNTER)
-            snprintf(desc, sizeof(desc), "Captain Huie!");
-        else if (EncounterType == BOTTLEOLDENCOUNTER ||
-                 EncounterType == BOTTLEGOODENCOUNTER)
-            snprintf(desc, sizeof(desc), "A floating bottle.");
-        else {
-            char opp_desc[24];
-            char ship_name[20];
-            snprintf(ship_name, sizeof(ship_name), "%s", Shiptype[Opponent.Type].Name);
-            ship_name[0] = (char)(ship_name[0] | 0x20); /* lowercase */
-            if (ENCOUNTERPOLICE(EncounterType))
-                snprintf(opp_desc, sizeof(opp_desc), "a police");
-            else if (Opponent.Type == MANTISTYPE)
-                snprintf(opp_desc, sizeof(opp_desc), "an alien");
-            else if (ENCOUNTERPIRATE(EncounterType))
-                snprintf(opp_desc, sizeof(opp_desc), "a pirate");
-            else if (ENCOUNTERTRADER(EncounterType))
-                snprintf(opp_desc, sizeof(opp_desc), "a trader");
-            else if (ENCOUNTERMONSTER(EncounterType))
-                snprintf(opp_desc, sizeof(opp_desc), "the Space Monster");
-            else
-                snprintf(opp_desc, sizeof(opp_desc), "a stolen");
-            if (ENCOUNTERMONSTER(EncounterType))
-                snprintf(desc, sizeof(desc), "You encounter %s!", opp_desc);
-            else
-                snprintf(desc, sizeof(desc), "You encounter %s %s.", opp_desc, ship_name);
-        }
-        ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL, "%s", desc);
-    }
-
-    /* Row 4: encounter status */
-    {
-        const char* st = "";
-        if (EncounterType == POLICEINSPECTION)
-            st = "Police want to inspect you.";
-        else if (EncounterType == POLICEFLEE || EncounterType == TRADERFLEE ||
-                 EncounterType == PIRATEFLEE)
-            st = "Your opponent is fleeing.";
-        else if (EncounterType == PIRATEATTACK || EncounterType == POLICEATTACK ||
-                 EncounterType == TRADERATTACK || EncounterType == SPACEMONSTERATTACK ||
-                 EncounterType == DRAGONFLYATTACK || EncounterType == SCARABATTACK ||
-                 EncounterType == FAMOUSCAPATTACK)
-            st = "Your opponent attacks!";
-        else if (EncounterType == TRADERIGNORE || EncounterType == POLICEIGNORE ||
-                 EncounterType == SPACEMONSTERIGNORE || EncounterType == DRAGONFLYIGNORE ||
-                 EncounterType == PIRATEIGNORE || EncounterType == SCARABIGNORE)
-            st = Cloaked(&Ship, &Opponent) ? "It doesn\'t notice you." : "It ignores you.";
-        else if (EncounterType == TRADERSELL || EncounterType == TRADERBUY)
-            st = "Hailed with an offer to trade.";
-        else if (EncounterType == TRADERSURRENDER || EncounterType == PIRATESURRENDER)
-            st = "Your opponent surrenders!";
-        else if (EncounterType == POSTMARIEPOLICEENCOUNTER)
-            st = "Give up the illegal goods!";
-        if (st[0])
-            ui_printf(0, UI_BODY_TOP + 2, PAL_HILIGHT, "%s", st);
-    }
-
-    /* Separator row */
-
-    /* Opponent ship stats */
-    ui_printf(0, UI_BODY_TOP + 4, PAL_WARN,
-        "THEM: %-12s  Hull:%3d%%  Sh:%s",
-        Shiptype[Opponent.Type].Name, opp_hull_pct, opp_shld_buf);
-
-    /* Player ship stats */
-    ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL,
-        "YOU:  %-12s  Hull:%3d%%  Sh:%s",
-        Shiptype[Ship.Type].Name, my_hull_pct, my_shld_buf);
-
-    /* Auto-combat indicator */
-    if (AutoAttack || AutoFlee) {
-        ui_printf(0, UI_BODY_TOP + 7, PAL_DIM,
-            "Auto-%s active  (Start=stop)",
-            AutoAttack ? "attack" : "flee");
-    }
+    if (ENCOUNTERPOLICE(EncounterType))          t = "POLICE";
+    else if (ENCOUNTERPIRATE(EncounterType))     t = "PIRATE";
+    else if (ENCOUNTERTRADER(EncounterType))     t = "TRADER";
+    else if (ENCOUNTERMONSTER(EncounterType))    t = "SPACE MONSTER";
+    else if (EncounterType == DRAGONFLYATTACK || EncounterType == DRAGONFLYIGNORE) t = "DRAGONFLY";
+    else if (EncounterType == SCARABATTACK || EncounterType == SCARABIGNORE)       t = "SCARAB";
+    else if (EncounterType == MARIECELESTEENCOUNTER) t = "MARIE CELESTE";
+    else if (EncounterType == CAPTAINAHABENCOUNTER || EncounterType == CAPTAINCONRADENCOUNTER ||
+             EncounterType == CAPTAINHUIEENCOUNTER)  t = "FAMOUS CAPTAIN";
+    else if (EncounterType == BOTTLEOLDENCOUNTER || EncounterType == BOTTLEGOODENCOUNTER) t = "FLOATING BOTTLE";
+    ui_title(t);
+    _enc_gfx();
+    ui_capture_print(20, PAL_NORMAL);
+    if (AutoAttack || AutoFlee)
+        ui_printf(1, 26, PAL_DIM, "Auto-%s active", AutoAttack ? "attack" : "flee");
 }
 
 static void screen_encounter(void)
 {
+    u16 wait = 0;
+    ui_tribbles = 0; ui_attack_icon = 0;
+    ui_capture(1);
+    _enc_gfx_init();
     deliver_open(EncounterFormHandleEvent, EncounterForm);
     _draw_encounter();
     _enc_status();
 
     while (_next_screen == SCREEN_NONE) {
-        if (Continuous && (AutoAttack || AutoFlee)) {
-            EventType nil_ev;
-            memset(&nil_ev, 0, sizeof(nil_ev));
-            nil_ev.eType = nilEvent;
-            EncounterFormHandleEvent(&nil_ev);
-            ui_vsync();
-            _draw_encounter();
-            _enc_status();
+        ui_vsync();
+        if (Continuous && (AutoAttack || AutoFlee) && !ui_joy_pressed) {
+            /* the Palm version ran a combat round on each nilEvent tick */
+            if (++wait < 30) continue;
+            wait = 0;
+            {
+                EventType nil_ev;
+                memset(&nil_ev, 0, sizeof(nil_ev));
+                nil_ev.eType = nilEvent;
+                EncounterFormHandleEvent(&nil_ev);
+            }
+            if (_next_screen == SCREEN_NONE) { _draw_encounter(); _enc_status(); }
             continue;
         }
-
-        ui_vsync();
         if (!ui_joy_pressed) continue;
 
+        if ((ui_joy_pressed & BTN_UP) && ui_tribbles) {
+            FrmAlert(SqueekAlert);
+            _draw_encounter(); _enc_status();
+            continue;
+        }
         {
             EncAct acts[4];
             int n = _enc_actions(acts), i;
@@ -1243,249 +1002,140 @@ static void screen_encounter(void)
             }
         }
     }
+    ui_capture(0);
 }
 
 /* -----------------------------------------------------------------------
  * PLUNDER SCREEN
  * --------------------------------------------------------------------- */
-static void draw_plunder(void)
+static void draw_plunder(int sel)
 {
-    ui_clear_body();
-    ui_title("PLUNDER");
     int i;
+    ui_clear_body();
+    ui_title("PLUNDER CARGO");
     for (i = 0; i < MAXTRADEITEM; i++) {
         int qty = Opponent.Cargo[i];
-        int pal = qty > 0 ? PAL_NORMAL : PAL_DIM;
-        ui_printf(0, UI_BODY_TOP + i, pal,
-            "%-12s x%d", Tradeitem[i].Name, qty);
+        ui_printf(0, UI_BODY_TOP + 1 + i, i == sel ? PAL_HILIGHT : (qty > 0 ? PAL_NORMAL : PAL_DIM),
+                  "%s %-12s %3d", i == sel ? ">" : " ", Tradeitem[i].Name, qty);
     }
-    ui_printf(0, UI_BODY_TOP + MAXTRADEITEM + 1, PAL_DIM,
-        "Bays free: %d", TotalCargoBays() - FilledCargoBays());
-    ui_status("UP/DN A=qty C=all B=dump St=done");
+    ui_printf(0, UI_BODY_TOP + MAXTRADEITEM + 3, PAL_NORMAL, "Bays: %d/%d",
+              FilledCargoBays(), TotalCargoBays());
+    ui_status("A=Qty  C=All  B=Dump  START=Done");
+    ui_printf(0, UI_BODY_TOP + MAXTRADEITEM + 5, PAL_DIM, "B = dump some of your own cargo");
 }
 
 static void screen_plunder(void)
 {
     int sel = 0;
-    draw_plunder();
+    deliver_open(PlunderFormHandleEvent, PlunderForm);
+    draw_plunder(sel);
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_DOWN) { if (sel < MAXTRADEITEM-1) sel++; draw_plunder(); }
-        if (joy & BTN_UP)   { if (sel > 0) sel--;              draw_plunder(); }
-        if (joy & BTN_A) {
-            if (Opponent.Cargo[sel] <= 0) {
-                ui_alert("They don't have any of this.");
-            } else {
-                int free = TotalCargoBays() - FilledCargoBays();
-                int max  = min(Opponent.Cargo[sel], free);
-                int qty  = _ask_qty("PLUNDER", Tradeitem[sel].Name, max, 0);
-                if (qty > 0) {
-                    PlunderCargo(sel, qty);
-                }
-                draw_plunder();
-            }
+        int btn = 0;
+        if (joy & BTN_DOWN) { sel = (sel + 1) % MAXTRADEITEM; draw_plunder(sel); }
+        if (joy & BTN_UP)   { sel = (sel + MAXTRADEITEM - 1) % MAXTRADEITEM; draw_plunder(sel); }
+        if (joy & BTN_A) btn = PlunderQty0Button + sel;
+        if (joy & BTN_C) btn = PlunderAll0Button + sel;
+        if (joy & BTN_B) btn = PlunderDumpButton;
+        if (joy & BTN_START) btn = PlunderDoneButton;
+        if (btn) {
+            deliver_button(PlunderFormHandleEvent, btn);
+            if (_next_screen != SCREEN_NONE) break;
+            if (btn == PlunderDoneButton) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
+            draw_plunder(sel);
         }
-        if (joy & BTN_C) {
-            PlunderCargo(sel, 999);
-            draw_plunder();
-        }
-        if (joy & BTN_B) {
-            /* Back to encounter — player may want to attack/flee instead */
-            ui_goto_screen(SCREEN_ENCOUNTER);
-            break;
-        }
-        if (joy & BTN_START) {
-            /* Done plundering — continue the game flow via Travel() */
-            if (EncounterType == MARIECELESTEENCOUNTER && Ship.Cargo[NARCOTICS] > 0)
-                JustLootedMarie = true;
-            Travel();
-            if (_next_screen == SCREEN_NONE)
-                ui_goto_screen(SCREEN_SYSTEM_INFO);
-            break;
-        }
-        if (_next_screen != SCREEN_NONE) break;
     }
 }
 
 /* -----------------------------------------------------------------------
  * COMMANDER STATUS SCREEN
  * --------------------------------------------------------------------- */
-static const char* _polrec_label(void)
-{
-    /* Use PoliceRecord[] array same as CmdrStatusEvent.c */
-    int i = 0;
-    while (i < MAXPOLICERECORD && PoliceRecordScore >= PoliceRecord[i].MinScore) i++;
-    i--;
-    if (i < 0) i = 0;
-    return PoliceRecord[i].Name;
-}
-static const char* _rep_label(void)
-{
-    /* Use Reputation[] array same as CmdrStatusEvent.c */
-    int i = 0;
-    while (i < MAXREPUTATION && ReputationScore >= Reputation[i].MinScore) i++;
-    i--;
-    if (i < 0) i = 0;
-    return Reputation[i].Name;
-}
 
-static void screen_commander_status(void)
+extern Boolean SpecialCargoFormHandleEvent(EventPtr ep);
+
+/* Screens whose Palm form is plain text: run the original draw code with
+ * DrawChars captured, then show exactly what it drew. */
+static void _text_form(const char* title, form_handler_t h, int formID)
 {
+    ui_capture(2);
+    deliver_open(h, formID);
     ui_clear_body();
-    ui_title("COMMANDER STATUS");
-    ui_printf(0, UI_BODY_TOP + 0, PAL_HILIGHT, "Cmdr  : %-16s", NameCommander);
-    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL,  "Days  : %d  Diff: %s",
-              (int)Days, DifficultyLevel[Difficulty]);
-    ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL,  "Worth : %ld cr", CurrentWorth());
-    ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL,  "Credits:%ld  Debt:%ld", Credits, Debt);
-    ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL,  "Police: %-12s (%d)", _polrec_label(), (int)PoliceRecordScore);
-    ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL,  "Rep   : %-12s (%d)", _rep_label(), (int)ReputationScore);
-    ui_printf(0, UI_BODY_TOP + 6, PAL_NORMAL,  "Pilot : %d  Fighter: %d",
-              (int)COMMANDER.Pilot, (int)COMMANDER.Fighter);
-    ui_printf(0, UI_BODY_TOP + 7, PAL_NORMAL,  "Trader: %d  Engineer: %d",
-              (int)COMMANDER.Trader, (int)COMMANDER.Engineer);
-    ui_printf(0, UI_BODY_TOP + 9, PAL_DIM, "A=Ship  B=Quests  C=Cargo  St=Back");
-    ui_status("A=Ship  B=Quests  C=Cargo  St=Back");
+    ui_title(title);
+    ui_capture_print(UI_BODY_TOP + 1, PAL_NORMAL);
+    ui_capture(0);
+}
 
+static void _status_tabs(form_handler_t h, int formID, const char* title,
+                         u16 j1, int b1, u16 j2, int b2, u16 j3, int b3, const char* status)
+{
+    _text_form(title, h, formID);
+    ui_status(status);
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_A)     { ui_goto_screen(SCREEN_CURRENT_SHIP); break; }
-        if (joy & BTN_B)     { ui_goto_screen(SCREEN_QUESTS); break; }
-        if (joy & BTN_C)     { ui_goto_screen(SCREEN_SPECIAL_CARGO); break; }
+        int btn = 0;
+        if (joy & j1) btn = b1;
+        if (joy & j2) btn = b2;
+        if (joy & j3) btn = b3;
+        if (btn) { deliver_button(h, btn); if (_next_screen != SCREEN_NONE) break; }
         if (joy & BTN_START) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
         if (_next_screen != SCREEN_NONE) break;
     }
 }
 
-/* -----------------------------------------------------------------------
- * CURRENT SHIP SCREEN
- * --------------------------------------------------------------------- */
-static void screen_current_ship(void)
+static void screen_commander_status(void)
 {
+    deliver_open(CommanderStatusFormHandleEvent, CommanderStatusForm);
     ui_clear_body();
-    ui_title("CURRENT SHIP");
-    ui_printf(0, UI_BODY_TOP + 0, PAL_HILIGHT, "%-16s", Shiptype[Ship.Type].Name);
-    ui_printf(0, UI_BODY_TOP + 1, PAL_NORMAL,  "Hull    : %d / %d",
-              (int)Ship.Hull, (int)Shiptype[Ship.Type].HullStrength);
-    ui_printf(0, UI_BODY_TOP + 2, PAL_NORMAL,  "Fuel    : %d / %d",
-              (int)Ship.Fuel, (int)Shiptype[Ship.Type].FuelTanks);
-    ui_printf(0, UI_BODY_TOP + 3, PAL_NORMAL,  "Cargo   : %d / %d bays",
-              FilledCargoBays(), TotalCargoBays());
-    ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL,  "Shields : %d / %d",
-              (int)TotalShields(&Ship), (int)TotalShieldStrength(&Ship));
-    ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL,  "Weapons : %d", TotalWeapons(&Ship, -1, -1));
-
-    /* Crew */
-    int i, row = 7;
-    for (i = 0; i < MAXCREW; i++) {
-        if (Ship.Crew[i] >= 0)
-            ui_printf(0, UI_BODY_TOP + row++, PAL_NORMAL,
-                "Crew  : %-12s P%dF%dT%dE%d",
-                MercenaryName[Mercenary[Ship.Crew[i]].NameIndex],
-                (int)Mercenary[Ship.Crew[i]].Pilot,
-                (int)Mercenary[Ship.Crew[i]].Fighter,
-                (int)Mercenary[Ship.Crew[i]].Trader,
-                (int)Mercenary[Ship.Crew[i]].Engineer);
-    }
-    if (EscapePod) ui_printf(0, UI_BODY_TOP + row++, PAL_NORMAL, "Escape pod installed");
-    if (Insurance) ui_printf(0, UI_BODY_TOP + row++, PAL_NORMAL, "Insurance active");
-
-    ui_status("B=Back");
+    ui_title("COMMANDER STATUS");
+    ui_printf(0, UI_BODY_TOP + 0,  PAL_HILIGHT, "Name:          %s", ui_label(CommanderStatusNameLabel));
+    ui_printf(0, UI_BODY_TOP + 2,  PAL_NORMAL,  "Pilot:         %s", ui_label(CommanderStatusPilotLabel));
+    ui_printf(0, UI_BODY_TOP + 3,  PAL_NORMAL,  "Fighter:       %s", ui_label(CommanderStatusFighterLabel));
+    ui_printf(0, UI_BODY_TOP + 4,  PAL_NORMAL,  "Trader:        %s", ui_label(CommanderStatusTraderLabel));
+    ui_printf(0, UI_BODY_TOP + 5,  PAL_NORMAL,  "Engineer:      %s", ui_label(CommanderStatusEngineerLabel));
+    ui_printf(0, UI_BODY_TOP + 7,  PAL_NORMAL,  "Kills:         %s", ui_label(CommanderStatusKillsLabel));
+    ui_printf(0, UI_BODY_TOP + 8,  PAL_NORMAL,  "Time:          %s", ui_label(CommanderStatusDaysLabel));
+    ui_printf(0, UI_BODY_TOP + 9,  PAL_NORMAL,  "Cash:          %s", ui_label(CommanderStatusCreditsLabel));
+    ui_printf(0, UI_BODY_TOP + 10, PAL_NORMAL,  "Debt:          %s", ui_label(CommanderStatusDebtLabel));
+    ui_printf(0, UI_BODY_TOP + 11, PAL_NORMAL,  "Net worth:     %s", ui_label(CommanderStatusNetWorthLabel));
+    ui_printf(0, UI_BODY_TOP + 13, PAL_NORMAL,  "Reputation:    %s", ui_label(CommanderStatusReputationLabel));
+    ui_printf(0, UI_BODY_TOP + 14, PAL_NORMAL,  "Police record: %s", ui_label(CommanderStatusPoliceRecordLabel));
+    ui_printf(0, UI_BODY_TOP + 15, PAL_NORMAL,  "Difficulty:    %s", ui_label(CommanderStatusLevelLabel));
+    ui_status("A=Ship B=Quests C=Cargo START=Back");
     for (;;) {
         u16 joy = wait_button();
-        if (joy & (BTN_B|BTN_START)) { ui_goto_screen(SCREEN_COMMANDER_STATUS); break; }
+        int btn = 0;
+        if (joy & BTN_A) btn = CommanderStatusShipButton;
+        if (joy & BTN_B) btn = CommanderStatusQuestsButton;
+        if (joy & BTN_C) btn = CommanderStatusSpecialButton;
+        if (btn) { deliver_button(CommanderStatusFormHandleEvent, btn); if (_next_screen != SCREEN_NONE) break; }
+        if (joy & BTN_START) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
         if (_next_screen != SCREEN_NONE) break;
     }
 }
 
-/* -----------------------------------------------------------------------
- * QUESTS SCREEN
- * --------------------------------------------------------------------- */
-static void _draw_quests(void)
+static void screen_current_ship(void)
 {
-    int row = UI_BODY_TOP;
-    int any = 0;
-    ui_clear_body();
-    ui_title("ACTIVE QUESTS");
-
-    #define QR(s) ui_printf(0, row++, PAL_NORMAL, s); any = 1
-    #define QF(fmt,...) ui_printf(0, row++, PAL_NORMAL, fmt, __VA_ARGS__); any = 1
-
-    if (MonsterStatus == 1) { QR("Kill the space monster at Acamar."); }
-
-    if (DragonflyStatus >= 1 && DragonflyStatus <= 4) {
-        const char* dest[] = {"Baratas","Melina","Regulas","Zalkon"};
-        QF("Follow the Dragonfly to %s.", dest[DragonflyStatus-1]);
-    } else if (SolarSystem[ZALKONSYSTEM].Special == INSTALLLIGHTNINGSHIELD) {
-        QR("Get your lightning shield at Zalkon.");
-    }
-
-    if (JaporiDiseaseStatus == 1) { QR("Deliver antidote to Japori."); }
-
-    if (ArtifactOnBoard) {
-        QR("Deliver alien artifact to Berger");
-        ui_printf(0, row++, PAL_DIM, "  (any hi-tech system).");
-    }
-
-    if (WildStatus == 1) { QR("Smuggle Jonathan Wild to Kravat."); }
-    if (JarekStatus == 1) { QR("Bring ambassador Jarek to Devidia."); }
-
-    if (InvasionStatus >= 1 && InvasionStatus < 7) {
-        QR("Warn Gemulon of alien invasion");
-        if (InvasionStatus == 6)
-            ui_printf(0, row++, PAL_WARN, "  by TOMORROW!");
-        else
-            ui_printf(0, row++, PAL_DIM, "  (%d day(s) remaining).", 7 - InvasionStatus);
-    } else if (SolarSystem[GEMULONSYSTEM].Special == GETFUELCOMPACTOR) {
-        QR("Get your fuel compactor at Gemulon.");
-    }
-
-    if (ExperimentStatus >= 1 && ExperimentStatus < 11) {
-        QR("Stop Dr. Fehler's experiment at Daled");
-        if (ExperimentStatus == 10)
-            ui_printf(0, row++, PAL_WARN, "  by TOMORROW!");
-        else
-            ui_printf(0, row++, PAL_DIM, "  (%d day(s) remaining).", 11 - ExperimentStatus);
-    }
-
-    if (ReactorStatus >= 1 && ReactorStatus < 21) {
-        QR("Deliver reactor to Nix for Henry Morgan.");
-        ui_printf(0, row++, PAL_DIM, "  Fuel cells left: %d%%", (int)((21 - ReactorStatus) * 5));
-    }
-
-    if (SolarSystem[NIXSYSTEM].Special == GETSPECIALLASER) {
-        QR("Get your special laser at Nix.");
-    }
-
-    if (ScarabStatus == 1) {
-        QR("Find & destroy the Scarab near a wormhole.");
-    }
-
-    if (Ship.Tribbles > 0) { QR("Get rid of those pesky tribbles."); }
-    if (MoonBought)         { QR("Claim your moon at Utopia."); }
-
-    if (!any) {
-        ui_printf(0, UI_BODY_TOP, PAL_DIM, "No open quests.");
-    }
-    #undef QR
-    #undef QF
-    ui_status("B=Back  A=Ship  C=Cargo");
+    _status_tabs(CurrentShipFormHandleEvent, CurrentShipForm, "CURRENT SHIP",
+                 BTN_A, CurrentShipStatusButton, BTN_B, CurrentShipQuestsButton,
+                 BTN_C, CurrentShipSpecialButton, "A=Status B=Quests C=Cargo START=Back");
 }
 
 static void screen_quests(void)
 {
-    _draw_quests();
-    for (;;) {
-        u16 joy = wait_button();
-        if (joy & (BTN_B|BTN_START)) { ui_goto_screen(SCREEN_COMMANDER_STATUS); break; }
-        if (joy & BTN_A)             { ui_goto_screen(SCREEN_CURRENT_SHIP); break; }
-        if (joy & BTN_C)             { ui_goto_screen(SCREEN_SPECIAL_CARGO); break; }
-        if (_next_screen != SCREEN_NONE) break;
-    }
+    _status_tabs(QuestsFormHandleEvent, QuestsForm, "QUESTS",
+                 BTN_A, QuestsStatusButton, BTN_B, QuestsShipButton,
+                 BTN_C, QuestsSpecialButton, "A=Status B=Ship C=Cargo START=Back");
+}
+
+static void screen_special_cargo(void)
+{
+    _status_tabs(SpecialCargoFormHandleEvent, SpecialCargoForm, "SPECIAL CARGO",
+                 BTN_A, SpecialCargoStatusButton, BTN_B, SpecialCargoShipButton,
+                 BTN_C, SpecialCargoQuestsButton, "A=Status B=Ship C=Quests START=Back");
 }
 
 /* -----------------------------------------------------------------------
- * AVERAGE PRICES SCREEN
+ * AVERAGE PRICES
  * --------------------------------------------------------------------- */
 static void _draw_avg_prices(void)
 {
@@ -1526,36 +1176,29 @@ static void _draw_avg_prices(void)
                 ui_printf(0, row, PAL_DIM, "%-12s  ---", Tradeitem[i].Name);
         }
     }
-    ui_status("A=Warp  B=Back  C=Toggle  LR=next sys");
+    ui_status("A=Warp B=Chart C=Diff LR=Sys START=Info");
 }
 
 static void screen_average_prices(void)
 {
-    /* Deliver open so AveragePricesFormHandleEvent can init APLscreen */
     deliver_open(AveragePricesFormHandleEvent, AveragePricesForm);
     _draw_avg_prices();
 
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_A)     { ui_goto_screen(SCREEN_EXECUTE_WARP); break; }
-        if (joy & (BTN_B|BTN_START)) { ui_goto_screen(SCREEN_WARP); break; }
-        if (joy & BTN_C) {
-            PriceDifferences = !PriceDifferences;
+        int btn = 0;
+        if (joy & BTN_A)     btn = AveragePricesWarpButton;
+        if (joy & BTN_START) btn = AveragePricesSystemInfoButton;
+        if (joy & BTN_C)     btn = PriceDifferences ? AveragePricesAbsolutePricesButton
+                                                    : AveragePricesPriceDifferencesButton;
+        if ((joy & BTN_RIGHT) && NextSystemWithinRange(WarpSystem, false) >= 0) btn = AveragePricesScrollFwdButton;
+        if ((joy & BTN_LEFT) && NextSystemWithinRange(WarpSystem, true) >= 0)   btn = AveragePricesScrollBackButton;
+        if (btn) {
+            deliver_button(AveragePricesFormHandleEvent, btn);
+            if (_next_screen != SCREEN_NONE) break;
             _draw_avg_prices();
-            continue;
         }
-        if (joy & BTN_RIGHT) {
-            int n = NextSystemWithinRange(WarpSystem, false);
-            if (n >= 0) WarpSystem = n;
-            _draw_avg_prices();
-            continue;
-        }
-        if (joy & BTN_LEFT) {
-            int n = NextSystemWithinRange(WarpSystem, true);
-            if (n >= 0) WarpSystem = n;
-            _draw_avg_prices();
-            continue;
-        }
+        if (joy & BTN_B) { ui_goto_screen(SCREEN_WARP); break; }
         if (_next_screen != SCREEN_NONE) break;
     }
 }
@@ -1568,142 +1211,24 @@ static void screen_average_prices(void)
 #define MAX_HEADLINES 20
 #define HL_LEN        40
 
-static char _headlines[MAX_HEADLINES][HL_LEN + 1];
-static int  _hl_count;
-
-static void _news_add(const char* s)
-{
-    if (_hl_count >= MAX_HEADLINES) return;
-    strncpy(_headlines[_hl_count], s, HL_LEN);
-    _headlines[_hl_count][HL_LEN] = '\0';
-    _hl_count++;
-}
-
-/* Build headline list using the same logic as DrawNewspaperForm.
- * SysStringByIndex / RandSeed are stubs — filler stories won't appear
- * but all real event-driven headlines will. */
-static void _build_headlines(void)
-{
-    char buf[128];
-    _hl_count = 0;
-
-    /* Quest / event headlines */
-    if (isNewsEvent(CAPTAINHUIEATTACKED))    _news_add("Famed Captain Huie Attacked!");
-    if (isNewsEvent(CAPTAINHUIEDESTROYED))   _news_add("Capt. Huie's Ship Destroyed!");
-    if (isNewsEvent(CAPTAINAHABATTACKED))    _news_add("Thug Assaults Captain Ahab!");
-    if (isNewsEvent(CAPTAINAHABDESTROYED))   _news_add("Capt. Ahab's Ship Destroyed!");
-    if (isNewsEvent(CAPTAINCONRADATTACKED))  _news_add("Conrad Under Attack By Criminal!");
-    if (isNewsEvent(CAPTAINCONRADDESTROYED)) _news_add("Conrad's Ship Destroyed!");
-    if (isNewsEvent(MONSTERKILLED))          _news_add("Hero Slays Space Monster!");
-    if (isNewsEvent(WILDARRESTED))           _news_add("J. Wild Arrested!");
-    if (isNewsEvent(EXPERIMENTSTOPPED))      _news_add("Scientists Cancel High-profile Test!");
-    if (isNewsEvent(EXPERIMENTNOTSTOPPED))   _news_add("Huge Explosion at Research Facility.");
-    if (isNewsEvent(EXPERIMENTPERFORMED))    _news_add("Timespace Damage Reported!");
-    if (isNewsEvent(DRAGONFLY))              _news_add("Experimental Craft Stolen!");
-    if (isNewsEvent(SCARAB))                 _news_add("Security Scandal: Test Craft Stolen.");
-    if (isNewsEvent(FLYBARATAS))             _news_add("Investigators Report Strange Craft.");
-    if (isNewsEvent(FLYMELINA))              _news_add("Melina Orbited by Odd Starcraft.");
-    if (isNewsEvent(FLYREGULAS))             _news_add("Strange Ship in Regulas Orbit.");
-    if (isNewsEvent(DRAGONFLYDESTROYED))     _news_add("Stolen Ship Destroyed in Battle.");
-    if (isNewsEvent(SCARABDESTROYED))        _news_add("Stolen Craft Destroyed at Wormhole.");
-    if (isNewsEvent(MEDICINEDELIVERY))       _news_add("Disease Antidotes Arrive! Optimism.");
-    if (isNewsEvent(JAPORIDISEASE))          _news_add("Editorial: We Must Help Japori!");
-    if (isNewsEvent(ARTIFACTDELIVERY))       _news_add("Alien Artifact Added to Museum.");
-    if (isNewsEvent(JAREKGETSOUT))           _news_add("Ambassador Jarek Returns from Crisis.");
-    if (isNewsEvent(WILDGETSOUT))            _news_add("Rumors: J. Wild Coming to Kravat!");
-    if (isNewsEvent(GEMULONRESCUED))         _news_add("Invasion Plans: Repelling Invaders.");
-    if (isNewsEvent(ALIENINVASION))          _news_add("Editorial: Who Will Warn Gemulon?");
-    if (isNewsEvent(ARRIVALVIASINGULARITY))  _news_add("Ship Materializes in Orbit!");
-    if (isNewsEvent(CAUGHTLITTERING)) {
-        snprintf(buf, sizeof(buf), "Space Litter Traced to %s.", NameCommander);
-        _news_add(buf);
-    }
-
-    /* Special condition at current system */
-    if (CURSYSTEM.Special == MONSTERKILLED && MonsterStatus == 1)
-        _news_add("Space Monster Threatens Homeworld!");
-    if (CURSYSTEM.Special == SCARABDESTROYED && ScarabStatus == 1)
-        _news_add("Unusual Ship Harasses Wormhole!");
-
-    /* System status */
-    if (CURSYSTEM.Status > 0) {
-        const char* s = NULL;
-        switch (CURSYSTEM.Status) {
-            case WAR:          s = "War: Offensives Continue!"; break;
-            case PLAGUE:       s = "Plague Spreads! Outlook Grim."; break;
-            case DROUGHT:      s = "No Rain in Sight!"; break;
-            case BOREDOM:      s = "Editors: Won't Someone Entertain Us?"; break;
-            case COLD:         s = "Cold Snap Continues!"; break;
-            case CROPFAILURE:  s = "Serious Crop Failure!"; break;
-            case LACKOFWORKERS:s = "Jobless Rate at All-Time Low!"; break;
-        }
-        if (s) _news_add(s);
-    }
-
-    /* Commander fame/infamy */
-    if (PoliceRecordScore <= VILLAINSCORE) {
-        snprintf(buf, sizeof(buf), "Criminal %s Spotted Here!", NameCommander);
-        _news_add(buf);
-    } else if (PoliceRecordScore >= HEROSCORE) {
-        snprintf(buf, sizeof(buf), "Hero %s Visits System!", NameCommander);
-        _news_add(buf);
-    }
-
-    /* Nearby system issues */
-    {
-        int i;
-        for (i = 0; i < MAXSOLARSYSTEM && _hl_count < MAX_HEADLINES; i++) {
-            if (i == COMMANDER.CurSystem) continue;
-            if (SolarSystem[i].Status == 0) continue;
-            if (RealDistance(CURSYSTEM, SolarSystem[i]) > Shiptype[Ship.Type].FuelTanks) continue;
-            if (SolarSystem[i].Special == MOONFORSALE) {
-                snprintf(buf, sizeof(buf), "Moon for Sale in %s System!",
-                    SolarSystemName[i]);
-                _news_add(buf);
-            }
-        }
-    }
-
-    if (_hl_count == 0) _news_add("No major news today.");
-}
-
-static void _draw_newspaper(int top)
-{
-    int i, vis = UI_BODY_ROWS - 2;
-    ui_clear_body();
-    ui_printf(0, UI_BODY_TOP, PAL_TITLE, "The %s Gazette",
-        SolarSystemName[CURSYSTEM.NameIndex]);
-    for (i = 0; i < vis && (top + i) < _hl_count; i++) {
-        ui_printf(0, UI_BODY_TOP + 1 + i, PAL_NORMAL,
-            "* %s", _headlines[top + i]);
-    }
-    if (_hl_count > vis)
-        ui_status_fmt("UP/DN=scroll (%d/%d)  B=Back", top+1, _hl_count);
-    else
-        ui_status("B=Back");
-}
 
 static void screen_newspaper(void)
 {
-    /* Deliver open so handler can run addNewsEvent side-effects */
+    ui_form_title[0] = '\0';
+    ui_capture(2);
     deliver_open(NewspaperFormHandleEvent, NewspaperForm);
-    _build_headlines();
-
-    int top = 0, vis = UI_BODY_ROWS - 2;
-    _draw_newspaper(top);
-
+    ui_clear_body();
+    ui_title(ui_form_title[0] ? ui_form_title : "NEWSPAPER");
+    ui_capture_print(UI_BODY_TOP + 1, PAL_NORMAL);
+    ui_capture(0);
+    ui_status("A/B = Done");
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_DOWN) {
-            if (top + vis < _hl_count) { top++; _draw_newspaper(top); }
-            continue;
+        if (joy & (BTN_A | BTN_B | BTN_START)) {
+            deliver_button(NewspaperFormHandleEvent, NewspaperDoneButton);
+            if (_next_screen == SCREEN_NONE) ui_goto_screen(SCREEN_SYSTEM_INFO);
+            break;
         }
-        if (joy & BTN_UP) {
-            if (top > 0) { top--; _draw_newspaper(top); }
-            continue;
-        }
-        if (joy & (BTN_B|BTN_START)) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
-        if (_next_screen != SCREEN_NONE) break;
     }
 }
 
@@ -1711,77 +1236,41 @@ static void screen_newspaper(void)
  * PERSONNEL ROSTER SCREEN
  * --------------------------------------------------------------------- */
 /* Draw the personnel roster screen from globals */
-static void _draw_personnel(int hilight_slot)
+static void _draw_personnel(void)
 {
-    int i;
+    ui_capture(2);
+    deliver_open(PersonnelRosterFormHandleEvent, PersonnelRosterForm);
+    /* the static labels of the Palm form */
+    GEN_WinDrawChars("Crew 1:", 7, 0, 17);
+    GEN_WinDrawChars("Crew 2:", 7, 0, 62);
+    GEN_WinDrawChars("For hire:", 9, 0, 107);
     ui_clear_body();
     ui_title("PERSONNEL ROSTER");
-    ui_printf(0, UI_BODY_TOP, PAL_NORMAL, "Credits: %ld cr", Credits);
-
-    /* Current crew (slots 1 and 2 — slot 0 is the commander) */
-    for (i = 0; i < 2; i++) {
-        int crew_idx = Ship.Crew[i + 1];
-        int row = UI_BODY_TOP + 2 + i * 3;
-        int pal = (i == hilight_slot) ? PAL_HILIGHT : PAL_NORMAL;
-        if (Shiptype[Ship.Type].CrewQuarters <= i + 1) {
-            ui_printf(0, row, PAL_DIM, "Slot %d: No quarters", i + 1);
-        } else if (crew_idx < 0) {
-            ui_printf(0, row, PAL_DIM, "Slot %d: Empty  (A=hire)", i + 1);
-        } else {
-            ui_printf(0, row, pal,
-                "Slot %d: %-12s P%dF%dT%dE%d  (A=fire)",
-                i + 1,
-                MercenaryName[Mercenary[crew_idx].NameIndex],
-                (int)Mercenary[crew_idx].Pilot,
-                (int)Mercenary[crew_idx].Fighter,
-                (int)Mercenary[crew_idx].Trader,
-                (int)Mercenary[crew_idx].Engineer);
-        }
-    }
-
-    /* Mercenary available for hire */
-    {
-            int hire = GetForHire();
-        int row = UI_BODY_TOP + 9;
-        if (hire >= 0) {
-            int daily = (Mercenary[hire].Pilot + Mercenary[hire].Fighter +
-                         Mercenary[hire].Trader + Mercenary[hire].Engineer) * 3;
-            ui_printf(0, row, PAL_NORMAL,
-                "For hire: %-12s P%dF%dT%dE%d",
-                MercenaryName[Mercenary[hire].NameIndex],
-                (int)Mercenary[hire].Pilot, (int)Mercenary[hire].Fighter,
-                (int)Mercenary[hire].Trader, (int)Mercenary[hire].Engineer);
-            ui_printf(0, row + 1, PAL_DIM, "Daily salary: %d cr", daily);
-        } else {
-            ui_printf(0, row, PAL_DIM, "No mercenaries available here.");
-        }
-    }
-    ui_status("UP/DN=slot  A=hire/fire  B=back");
+    ui_capture_print(UI_BODY_TOP + 1, PAL_NORMAL);
+    ui_capture(0);
+    ui_printf(0, UI_BODY_BOT - 1, PAL_DIM, "Cash: %ld cr.", Credits);
+    ui_status("A=Hire UP=Fire 1st DN=Fire 2nd B=Back");
 }
 
 static void screen_personnel(void)
 {
-    int slot = 0;   /* 0 or 1: the crew slot being highlighted */
-    _draw_personnel(slot);
-
+    _draw_personnel();
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_DOWN) { slot = (slot + 1) % 2; _draw_personnel(slot); continue; }
-        if (joy & BTN_UP)   { slot = (slot + 1) % 2; _draw_personnel(slot); continue; }
-        if (joy & BTN_A) {
-            int crew_idx = Ship.Crew[slot + 1];
-            if (crew_idx >= 0) {
-                /* Fire — deliver ctlSelectEvent for the fire button */
-                deliver_button(PersonnelRosterFormHandleEvent,
-                               PersonnelRosterFire0Button + slot);
-            } else {
-                /* Hire — deliver ctlSelectEvent for the hire button */
-                deliver_button(PersonnelRosterFormHandleEvent,
-                               PersonnelRosterHire0Button);
-            }
-            _draw_personnel(slot);
+        int btn = 0;
+        if ((joy & BTN_UP) && Ship.Crew[1] >= 0)   btn = PersonnelRosterFire0Button;
+        if ((joy & BTN_DOWN) && Ship.Crew[2] >= 0) btn = PersonnelRosterFire0Button + 1;
+        if ((joy & BTN_A) && GetForHire() >= 0)    btn = PersonnelRosterHire0Button;
+        if (btn) {
+            deliver_button(PersonnelRosterFormHandleEvent, btn);
+            _draw_personnel();
         }
         if (joy & BTN_B) { ui_goto_screen(SCREEN_SYSTEM_INFO); break; }
+        if (joy & BTN_START) {
+            CurForm = PersonnelRosterForm;
+            if (ui_menu()) break;
+            _draw_personnel();
+        }
         if (_next_screen != SCREEN_NONE) break;
     }
 }
@@ -1821,7 +1310,7 @@ static void screen_buy_ship(void)
 {
     /* Deliver open so BuyShipFormHandleEvent can init state */
     deliver_open(BuyShipFormHandleEvent, BuyShipForm);
-    int sel = 0;
+    int sel = (SelectedShipType >= 0 && SelectedShipType < MAXSHIPTYPE) ? SelectedShipType : 0;
     _draw_buy_ship(sel);
 
     for (;;) {
@@ -1830,8 +1319,9 @@ static void screen_buy_ship(void)
         if (joy & BTN_UP)   { if (sel > 0)             sel--; _draw_buy_ship(sel); continue; }
         if (joy & BTN_C) {
             /* Info button: show ship spec via ShiptypeInfoForm */
-            deliver_button(BuyShipFormHandleEvent, BuyShipInfo0Button + sel);
-            _draw_buy_ship(sel);
+            SelectedShipType = sel;
+            ui_goto_screen(SCREEN_SHIPTYPE_INFO);
+            break;
         }
         if (joy & BTN_A) {
             if (ShipPrice[sel] > 0 && Ship.Type != sel)
@@ -1954,148 +1444,136 @@ static void screen_sell_equipment(void)
 /* -----------------------------------------------------------------------
  * SPECIAL EVENT SCREEN
  * --------------------------------------------------------------------- */
-static void _draw_special_event(void)
-{
-    int sp = CURSYSTEM.Special;
-    Boolean just_msg = SpecialEvent[sp].JustAMessage;
-
-    ui_clear_body();
-    ui_title(SpecialEvent[sp].Title ? SpecialEvent[sp].Title : "Special Event");
-
-    /* Draw the quest description text (word-wrapped) */
-    /* SysCopyStringResource is a stub, so we show what we know from the title
-     * and the price. For a full port we would need the string resource data. */
-    if (SpecialEvent[sp].Price > 0)
-        ui_printf(0, UI_BODY_TOP, PAL_NORMAL, "Cost: %ld cr", SpecialEvent[sp].Price);
-    else if (SpecialEvent[sp].Price < 0)
-        ui_printf(0, UI_BODY_TOP, PAL_HILIGHT, "Reward: %ld cr", -SpecialEvent[sp].Price);
-    else
-        ui_printf(0, UI_BODY_TOP, PAL_DIM, "No cost.");
-
-    if (just_msg)
-        ui_status("A = OK");
-    else
-        ui_status("A=Yes / Accept    B=No / Decline");
-}
-
 static void screen_special_event(void)
 {
-    /* Deliver open so SpecialEventFormHandleEvent can set up any state */
-    deliver_open(SpecialEventFormHandleEvent, SpecialEventForm);
-    _draw_special_event();
-
     int sp = CURSYSTEM.Special;
     Boolean just_msg = SpecialEvent[sp].JustAMessage;
+
+    ui_capture(2);
+    deliver_open(SpecialEventFormHandleEvent, SpecialEventForm);
+    ui_clear_body();
+    ui_title(ui_form_title[0] ? ui_form_title : "Special Event");
+    ui_wrap(ui_page, UI_BODY_TOP + 1, PAL_NORMAL);
+    ui_capture(0);
+    ui_status(just_msg ? "A = OK" : "A = Yes     B = No");
+    snd_play(SND_INFO);
 
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_A) {
-            /* Accept / OK */
-            int btn = just_msg ? SpecialEventOKButton : SpecialEventYesButton;
-            deliver_button(SpecialEventFormHandleEvent, btn);
-            _draw_special_event();
-        }
-        if ((joy & BTN_B) && !just_msg) {
+        if (joy & BTN_A)
+            deliver_button(SpecialEventFormHandleEvent, just_msg ? SpecialEventOKButton : SpecialEventYesButton);
+        else if ((joy & BTN_B) && !just_msg)
             deliver_button(SpecialEventFormHandleEvent, SpecialEventNoButton);
-        }
-        if (_next_screen != SCREEN_NONE) break;
-        /* After an OK-only event, navigate back */
-        if (just_msg && (joy & (BTN_B|BTN_START))) {
-            ui_goto_screen(SCREEN_SYSTEM_INFO);
-            break;
-        }
+        else
+            continue;
+        if (_next_screen == SCREEN_NONE) ui_goto_screen(SCREEN_SYSTEM_INFO);
+        break;
     }
 }
 
 /* -----------------------------------------------------------------------
  * SPECIAL CARGO SCREEN
  * --------------------------------------------------------------------- */
-static void screen_special_cargo(void)
-{
-    ui_clear_body();
-    ui_title("SPECIAL CARGO");
-    int row = UI_BODY_TOP;
-    if (Ship.Tribbles > 0)
-        ui_printf(0, row++, PAL_NORMAL, "Tribbles: %d", (int)Ship.Tribbles);
-    if (ArtifactOnBoard)
-        ui_printf(0, row++, PAL_NORMAL, "Alien artifact");
-    if (JarekStatus == 1)
-        ui_printf(0, row++, PAL_NORMAL, "Jarek (passenger)");
-    if (WildStatus == 1)
-        ui_printf(0, row++, PAL_NORMAL, "Jonathan Wild");
-    if (ReactorStatus > 0 && ReactorStatus < 21)
-        ui_printf(0, row++, PAL_NORMAL, "Ion Reactor (status %d)", (int)ReactorStatus);
-    if (row == UI_BODY_TOP)
-        ui_printf(0, row, PAL_DIM, "No special cargo.");
-    ui_status("B=Back");
-    for (;;) {
-        u16 joy = wait_button();
-        if (joy & (BTN_B|BTN_START)) { ui_goto_screen(SCREEN_COMMANDER_STATUS); break; }
-        if (_next_screen != SCREEN_NONE) break;
-    }
-}
 
 /* -----------------------------------------------------------------------
  * DESTROYED / RETIRE / UTOPIA screens
  * --------------------------------------------------------------------- */
 /* Deliver a key press to a form handler and wait for it to set _next_screen */
-static void _endgame_screen(const char* title, const char* msg,
+static void _endgame_screen(const char* title, int pic,
                              form_handler_t handler, int formID)
 {
     EventType ev;
-    /* Open the handler so it can do any state init on frmOpenEvent */
     deliver_open(handler, formID);
 
-    /* Draw our own text since DrawChars is a no-op */
-    ui_clear_body();
+    ui_clear_screen();
     ui_title(title);
-    ui_printf(0, UI_BODY_TOP + 2, PAL_HILIGHT, "%s", msg);
-    ui_printf(0, UI_BODY_TOP + 4, PAL_NORMAL, "Commander: %s", NameCommander);
-    ui_printf(0, UI_BODY_TOP + 5, PAL_NORMAL, "Days: %d   Worth: %ld cr",
-              (int)Days, CurrentWorth());
+    gfx_picture(pic, 10, 3);
+    ui_printf(1, 24, PAL_NORMAL, "Commander %s", NameCommander);
+    ui_printf(1, 25, PAL_NORMAL, "Days: %d   Worth: %ld cr", (int)Days, CurrentWorth());
     ui_status("A = Continue");
+    snd_play(pic == PIC_DESTROYED ? SND_ERROR : SND_CONFIRM);
 
     for (;;) {
         u16 joy = wait_button();
-        if (joy & BTN_A) {
-            /* Deliver keyDownEvent — triggers EndOfGame() inside the handler.
-             * EndOfGame calls FrmDoDialog(FinalScoreForm) then FrmGotoForm(MainForm).
-             * FrmGotoForm sets _next_screen = SCREEN_SYSTEM_INFO. */
+        if (joy & (BTN_A | BTN_START)) {
+            gfx_reset();
+            ui_clear_screen();
             memset(&ev, 0, sizeof(ev));
             ev.eType = keyDownEvent;
             ev.data.keyDown.chr = chrReturn;
             handler(&ev);
-            /* If EndOfGame set _next_screen, we're done */
-            if (_next_screen != SCREEN_NONE) break;
-            /* Otherwise fall back to system info */
-            ui_goto_screen(SCREEN_SYSTEM_INFO);
+            if (_next_screen == SCREEN_NONE) ui_goto_screen(SCREEN_MAIN);
             break;
         }
-        if (_next_screen != SCREEN_NONE) break;
     }
 }
 
 static void screen_destroyed(void)
 {
-    _endgame_screen("SHIP DESTROYED",
-        "Your ship has been destroyed!",
+    _endgame_screen("YOUR SHIP HAS BEEN DESTROYED", PIC_DESTROYED,
         DestroyedFormHandleEvent, DestroyedForm);
 }
 
 static void screen_retire(void)
 {
-    _endgame_screen("RETIREMENT",
-        "You have chosen to retire.",
+    _endgame_screen("YOU HAVE RETIRED", PIC_RETIRE,
         RetireFormHandleEvent, RetireForm);
 }
 
 static void screen_utopia(void)
 {
-    _endgame_screen("UTOPIA!",
-        "You have bought a moon! You retire.",
+    _endgame_screen("YOU RETIRE TO YOUR OWN MOON", PIC_UTOPIA,
         UtopiaFormHandleEvent, UtopiaForm);
 }
 
+/* -----------------------------------------------------------------------
+ * MAIN FORM - the title picture; shown after a game ended. Any button
+ * starts a new game, exactly like the Palm MainForm.
+ * --------------------------------------------------------------------- */
+static void screen_main(void)
+{
+    extern void sram_clear_slot(int slot);
+    sram_clear_slot(0);                 /* the finished game is gone */
+    gfx_picture(PIC_TITLE, 10, 1);
+    ui_printf(2, 23, PAL_NORMAL, "Space Trader 1.2.2 for Sega Genesis");
+    ui_status("A / START = New Game");
+    for (;;) {
+        u16 joy = wait_button();
+        if (joy & (BTN_A | BTN_START)) break;
+    }
+    gfx_reset();
+    ui_clear_screen();
+    StartNewGame();
+    if (_next_screen == SCREEN_NONE) ui_goto_screen(SCREEN_NEW_COMMANDER);
+}
+
+/* -----------------------------------------------------------------------
+ * SHIPTYPE INFORMATION (ship specs + the original ship bitmap)
+ * --------------------------------------------------------------------- */
+static void screen_shiptype_info(void)
+{
+    int t = SelectedShipType;
+    ui_title("SHIP INFORMATION");
+    ui_printf(1, 3, PAL_HILIGHT, "%s", Shiptype[t].Name);
+    ui_printf(1, 5,  PAL_NORMAL, "Size:           %s", SystemSize[Shiptype[t].Size]);
+    ui_printf(1, 6,  PAL_NORMAL, "Cargo bays:     %d", (int)Shiptype[t].CargoBays);
+    ui_printf(1, 7,  PAL_NORMAL, "Weapon slots:   %d", (int)Shiptype[t].WeaponSlots);
+    ui_printf(1, 8,  PAL_NORMAL, "Shield slots:   %d", (int)Shiptype[t].ShieldSlots);
+    ui_printf(1, 9,  PAL_NORMAL, "Gadget slots:   %d", (int)Shiptype[t].GadgetSlots);
+    ui_printf(1, 10, PAL_NORMAL, "Crew quarters:  %d", (int)Shiptype[t].CrewQuarters);
+    ui_printf(1, 11, PAL_NORMAL, "Maximum range:  %d parsecs", (int)Shiptype[t].FuelTanks);
+    ui_printf(1, 12, PAL_NORMAL, "Hull strength:  %d", (int)Shiptype[t].HullStrength);
+    gfx_set_pal(PAL1, gfx_ship_pal[t]);
+    gfx_ship_draw(GFX_TILE_BASE, t, 1, 1, 0, 0);
+    gfx_place(PAL1, GFX_TILE_BASE, 12, 14, 16, 13);
+    ui_status("A/B = Back");
+    for (;;) {
+        u16 joy = wait_button();
+        if (joy & (BTN_A | BTN_B | BTN_START)) break;
+    }
+    CurForm = BuyShipForm;
+    ui_goto_screen(SCREEN_BUY_SHIP);
+}
 
 /* -----------------------------------------------------------------------
  * NEW COMMANDER SCREEN
@@ -2143,7 +1621,7 @@ static void screen_new_commander(void)
         ui_clear_body(); \
         ui_title("NEW COMMANDER"); \
         ui_printf(0, UI_BODY_TOP+0, PAL_NORMAL,  "Name      : %-20s", NameCommander); \
-        ui_printf(0, UI_BODY_TOP+1, PAL_DIM,     "(B = cycle name)"); \
+        ui_printf(0, UI_BODY_TOP+1, PAL_DIM,     "(B = preset name, C = type a name)"); \
         ui_printf(0, UI_BODY_TOP+3, \
             field==F_DIFF ? PAL_HILIGHT : PAL_NORMAL, \
             "Difficulty: %-10s   %s", DifficultyLevel[Difficulty], \
@@ -2179,6 +1657,17 @@ static void screen_new_commander(void)
             name_idx = (name_idx + 1) % N_NAMES;
             strncpy(NameCommander, preset_names[name_idx], NAMELEN);
             NameCommander[NAMELEN] = '\0';
+            _DRAW_NCMD();
+            continue;
+        }
+
+        if (joy & BTN_C) {
+            char nm[NAMELEN + 1];
+            strncpy(nm, NameCommander, NAMELEN); nm[NAMELEN] = '\0';
+            if (ui_text_input("COMMANDER NAME", nm, NAMELEN) && nm[0]) {
+                strncpy(NameCommander, nm, NAMELEN);
+                NameCommander[NAMELEN] = '\0';
+            }
             _DRAW_NCMD();
             continue;
         }
@@ -2270,7 +1759,7 @@ void palm_form_to_screen(int formID)
         case DumpCargoForm:       sid = SCREEN_DUMP_CARGO;    break;
         case ShipYardForm:           sid = SCREEN_SHIPYARD;         break;
         case BuyShipForm:            sid = SCREEN_BUY_SHIP;         break;
-        case ShiptypeInfoForm:       sid = SCREEN_BUY_SHIP;         break;
+        case ShiptypeInfoForm:       sid = SCREEN_SHIPTYPE_INFO;    break;
         case BuyEquipmentForm:       sid = SCREEN_BUY_EQUIPMENT;    break;
         case SellEquipmentForm:      sid = SCREEN_SELL_EQUIPMENT;   break;
         case PersonnelRosterForm:    sid = SCREEN_PERSONNEL;        break;
@@ -2288,7 +1777,7 @@ void palm_form_to_screen(int formID)
         case RetireForm:             sid = SCREEN_RETIRE;           break;
         case UtopiaForm:             sid = SCREEN_UTOPIA;           break;
         case NewCommanderForm:       sid = SCREEN_NEW_COMMANDER;    break;
-        case MainForm:               sid = SCREEN_SYSTEM_INFO;      break;
+        case MainForm:               sid = SCREEN_MAIN;             break;
         default:
             kprintf("palm_form_to_screen: unknown formID=%d", formID);
             return;

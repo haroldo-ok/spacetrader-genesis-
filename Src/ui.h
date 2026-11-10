@@ -72,6 +72,25 @@ void ui_hline(u8 row);
 void ui_alert(const char* msg);           /* show msg, A=dismiss       */
 int  ui_confirm(const char* question);    /* A=yes(1)  B=no(0)         */
 
+int  ui_alert_buttons(const char* title, const char* msg,
+                      const char* const* btns, int n, int def, int type);
+u8   ui_wrap(const char* text, u8 start_row, u8 pal);
+void ui_text_viewer(const char* title, const char* text);
+const char* ui_string(int id);
+void ui_help(int stringID);
+int  ui_text_input(const char* title, char* buf, int maxlen);
+void ui_capture(int on);
+int  ui_capture_print(u8 row, u8 pal);
+const char* ui_capture_at(int y);
+const char* ui_label(int id);
+extern char ui_form_title[];
+extern char ui_page[];
+void ui_obj_show(int id, int on);
+extern u32 ui_tribbles;
+extern u8  ui_attack_icon;
+extern int ui_last_obj;
+void ui_labels_clear(void);
+
 /* ── SRAM ────────────────────────────────────────────────────────────────  */
 void    sram_save_game(void);
 void    sram_load_game(void);

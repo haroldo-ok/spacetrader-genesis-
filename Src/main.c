@@ -1,5 +1,5 @@
 /**
- * main.c  -  Space Trader 1.2.0 for Sega Genesis (SGDK 1.70)
+ * main.c  -  Space Trader 1.2.2 for Sega Genesis (SGDK)
  *
  * Joypad:  A=confirm  B=back  C=alt  Start=menu  D-Pad=navigate
  * SRAM:    [2B magic][~700B save][2B hs-magic][84B highscores]
@@ -8,6 +8,7 @@
 #include "genesis.h"
 #include "external.h"
 #include "ui.h"
+#include "gfx.h"
 #include "ui_screens.h"
 
 extern Err  GenAppStart(void);
@@ -20,18 +21,21 @@ extern void GenAppStop(void);
 static u16 show_splash(void)
 {
     ui_clear_screen();
-    ui_printf(4,  4, PAL_TITLE,  " ___  ___  _   ___ ___  ");
-    ui_printf(4,  5, PAL_TITLE,  "/ __|| _ |/ | / __| __| ");
-    ui_printf(4,  6, PAL_TITLE,  "|__ ||  _/ _ | (__| _|  ");
-    ui_printf(4,  7, PAL_TITLE,  "|___/|_|/_/ |_|___|___| ");
-    ui_printf(3,  9, PAL_HILIGHT,"  T R A D E R  1 . 2 . 0 ");
-    ui_printf(0, 11, PAL_NORMAL, "  Sega Genesis Port");
-    ui_printf(0, 12, PAL_DIM,    "  Pieter Spronck / SGDK 1.70");
-    ui_printf(0, UI_STATUS_ROW,  PAL_STATUS, "  A=New Game       B=Continue  ");
+    gfx_reset();
+    gfx_picture(PIC_TITLE, 10, 1);          /* original Palm title bitmap */
+    ui_printf(7, 22, PAL_NORMAL, "Space Trader 1.2.2  (C) 2000-2002");
+    ui_printf(7, 23, PAL_NORMAL, "by Pieter Spronck");
+    ui_printf(7, 24, PAL_NORMAL, "Pictures (C) Alexander Lawrence");
+    ui_printf(7, 25, PAL_NORMAL, "Sega Genesis port v0.1.0");
+    ui_print(0, UI_STATUS_ROW, PAL_NORMAL, "   A/START = New Game    B = Continue   ");
     for (;;) {
         ui_vsync();
-        if (ui_joy_pressed & (BTN_A|BTN_B|BTN_START))
-            return ui_joy_pressed;
+        if (ui_joy_pressed & (BTN_A|BTN_B|BTN_START)) {
+            u16 b = ui_joy_pressed;
+            gfx_reset();
+            ui_clear_screen();
+            return b;
+        }
     }
 }
 
@@ -80,11 +84,9 @@ u16 main(u16 hardReset)
     }
 
     if (new_game) {
-        /* Zero magic bytes so GenAppStart doesn't load the stale save */
-        SRAM_enable();
-        uint16_t zero = 0;
-        SRAM_writeBuffer(&zero, 0, sizeof(zero));
-        SRAM_disable();
+        /* forget the stored current game so GenAppStart starts fresh */
+        extern void sram_clear_slot(int slot);
+        sram_clear_slot(0);
     }
 
     Err err = GenAppStart();
