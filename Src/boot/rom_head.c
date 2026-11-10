@@ -10,8 +10,8 @@ const ROMHeader rom_header = {
     "SEGA MEGA DRIVE ",
 #endif
     "(C)SGDK 2021    ",
-    "SPACE TRADER GENESIS v0.0.3                     ",
-    "SPACE TRADER GENESIS v0.0.3                     ",
+    "SPACE TRADER GENESIS v0.1.0                     ",
+    "SPACE TRADER GENESIS v0.1.0                     ",
     "GM 00000000-00",
     0x000,
     "JD              ",
@@ -19,7 +19,7 @@ const ROMHeader rom_header = {
 #if (ENABLE_BANK_SWITCH != 0)
     0x003FFFFF,
 #else
-    0x000FFFFF,
+    0x0009FFFF,
 #endif
     0xE0FF0000,
     0xE0FFFFFF,
@@ -28,6 +28,6 @@ const ROMHeader rom_header = {
     0x00200000,
     0x0020FFFF,
     "            ",
-    "SPACE TRADER GENESIS v0.0.3            ",
+    "SPACE TRADER GENESIS v0.1.0            ",
     "JUE             "
 };

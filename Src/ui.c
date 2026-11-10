@@ -23,6 +23,7 @@
  */
 
 #include "genesis.h"
+#include "gfx.h"
 #include "ui.h"
 #include "external.h"
 #ifndef SGDK_GCC
@@ -62,18 +63,11 @@ extern char FindSystem[];          /* WarpFormEvent.c — galaxy chart search */
  *   PAL3  dark green PAL_STATUS, PAL_DIM
  * ====================================================================== */
 static const u16 _pal_data[64] = {
-    /* PAL0 white */
-    0x0000,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,
-    0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,0x0EEE,
-    /* PAL1 yellow */
-    0x0000,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,
-    0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,0x00EE,
-    /* PAL2 cyan */
-    0x0000,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,
-    0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,0x0EE0,
-    /* PAL3 dark green */
-    0x0000,0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,
-    0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,0x0060,
+    /* colour 15 of each palette is the text colour; 1-14 belong to gfx.c */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x0EEE,   /* PAL0 white  */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x00EE,   /* PAL1 yellow */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x0EE0,   /* PAL2 cyan   */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0x00A0,   /* PAL3 green  */
 };
 
 static const u8 _pal_hw[6] = { 0,1,2,3,1,3 };
@@ -82,9 +76,11 @@ static const u8 _pal_hw[6] = { 0,1,2,3,1,3 };
 /* =========================================================================
  * §3  Init & vsync
  * ====================================================================== */
+static void _vint(void);
 void ui_init(void)
 {
     JOY_init();
+    SYS_setVIntCallback(_vint);
     PAL_setColors(0, _pal_data, 64, CPU);
     VDP_clearPlane(BG_A, TRUE);
     VDP_clearPlane(BG_B, TRUE);
@@ -94,14 +90,30 @@ void ui_init(void)
     kprintf("ui_init done");
 }
 
-void ui_vsync(void)
+/* Button presses are edge-latched in the vertical interrupt so that taps
+ * made while a slow screen redraw is running are never lost. */
+static volatile u16 _joy_latch;
+static u16 _joy_prev;
+
+static void _vint(void)
 {
     u16 cur;
-    SYS_doVBlankProcess();
-    ui_frame_count++;
+    JOY_update();
     cur = JOY_readJoypad(JOY_1);
-    ui_joy_pressed = cur & ~ui_joy_held;
-    ui_joy_held    = cur;
+    _joy_latch |= cur & ~_joy_prev;
+    _joy_prev = cur;
+}
+
+void ui_vsync(void)
+{
+    SYS_doVBlankProcess();
+    snd_tick();
+    ui_frame_count++;
+    SYS_disableInts();
+    ui_joy_pressed = _joy_latch;
+    _joy_latch = 0;
+    SYS_enableInts();
+    ui_joy_held = JOY_readJoypad(JOY_1);
 }
 
 /* =========================================================================
@@ -185,53 +197,6 @@ void ui_hline(u8 row)
  * §5  Modal dialogs
  * ====================================================================== */
 
-/* Word-wrap text into rows [start_row, UI_BODY_BOT-3].
- * Returns the next free row. */
-static u8 _wrap(const char* text, u8 start_row, u8 pal)
-{
-    u8 row = start_row;
-    const char* p = text;
-    while (*p && row <= (u8)(UI_BODY_BOT - 3)) {
-        char line[UI_COLS + 1];
-        int k = 0;
-        const char* sp = NULL;
-        while (*p && k < UI_COLS) {
-            if (*p == '\n') { p++; break; }
-            if (*p == ' ')  sp = &line[k];
-            line[k++] = *p++;
-        }
-        if (*p && *p != '\n' && sp) {
-            int back = (int)(&line[k] - sp - 1);
-            p -= back; k -= back;
-        }
-        line[k] = '\0';
-        ui_print(1, row++, pal, line);
-    }
-    return row;
-}
-
-void ui_alert(const char* msg)
-{
-    ui_clear_body();
-    ui_hline(UI_BODY_TOP);
-    _wrap(msg, UI_BODY_TOP + 1, PAL_NORMAL);
-    ui_status("A = OK");
-    for (;;) { ui_vsync(); if (ui_joy_pressed & BTN_A) return; }
-}
-
-int ui_confirm(const char* question)
-{
-    ui_clear_body();
-    ui_hline(UI_BODY_TOP);
-    _wrap(question, UI_BODY_TOP + 1, PAL_NORMAL);
-    ui_status("A = Yes    B = No");
-    for (;;) {
-        ui_vsync();
-        if (ui_joy_pressed & BTN_A) return 1;
-        if (ui_joy_pressed & BTN_B) return 0;
-    }
-}
-
 /* =========================================================================
  * §6  SRAM
  * ====================================================================== */
@@ -239,259 +204,58 @@ int ui_confirm(const char* question)
 #define SRAM_MAGIC_OFF 0
 #define SRAM_DATA_OFF  2
 
-Boolean sram_has_save(void)
+/* Three save slots, like the Palm version's three stores:
+ *   0 = current game (the Palm saved it when you left the application;
+ *       here it is written on arrival at a system and when the menu opens)
+ *   1 = Snapshot,  2 = Switch Game,  3 = scratch used while switching.
+ * A slot is [magic][SAVEGAMETYPE]. The high scores live after slot 0. */
+#define SRAM_SLOT_SIZE 0x1D20UL
+static SAVEGAMETYPE _sg;              /* too big (7 KB) for the 2.5 KB stack */
+
+__attribute__((used)) SAVEGAMETYPE* sram_buffer(void) { return &_sg; }
+
+__attribute__((used)) Boolean sram_has_slot(int slot)
 {
     u16 m = 0;
     SRAM_enable();
-    SRAM_readBuffer(&m, SRAM_MAGIC_OFF, sizeof(m));
+    SRAM_readBuffer(&m, slot * SRAM_SLOT_SIZE + SRAM_MAGIC_OFF, sizeof(m));
     SRAM_disable();
     return m == SRAM_MAGIC;
 }
 
-void sram_save_game(void)
-{
-    /* sram_save_full is called directly from SaveGame() in Merchant.c */
-}
+Boolean sram_has_save(void) { return sram_has_slot(0); }
 
-void sram_load_game(void)
-{
-    /* sram_load_full is called directly from LoadGame() in Merchant.c */
-}
-
-__attribute__((used)) void sram_save_full(SAVEGAMETYPE* sg)
+__attribute__((used)) void sram_save_slot(SAVEGAMETYPE* sg, int slot)
 {
     u16 m = SRAM_MAGIC;
     SRAM_enable();
-    SRAM_writeBuffer(&m, SRAM_MAGIC_OFF, sizeof(m));
-    SRAM_writeBuffer(sg, SRAM_DATA_OFF, sizeof(SAVEGAMETYPE));
+    SRAM_writeBuffer(&m, slot * SRAM_SLOT_SIZE + SRAM_MAGIC_OFF, sizeof(m));
+    SRAM_writeBuffer(sg, slot * SRAM_SLOT_SIZE + SRAM_DATA_OFF, sizeof(SAVEGAMETYPE));
     SRAM_disable();
 }
 
-__attribute__((used)) void sram_load_full(SAVEGAMETYPE* sg)
+__attribute__((used)) void sram_load_slot(SAVEGAMETYPE* sg, int slot)
 {
     SRAM_enable();
-    SRAM_readBuffer(sg, SRAM_DATA_OFF, sizeof(SAVEGAMETYPE));
+    SRAM_readBuffer(sg, slot * SRAM_SLOT_SIZE + SRAM_DATA_OFF, sizeof(SAVEGAMETYPE));
     SRAM_disable();
 }
 
-/* =========================================================================
- * §7  Alert text table
- *
- * Every Palm alert ID mapped to a message string and yes/no flag.
- * Yes/no alerts return 0 for the affirmative button (matching Palm).
- * ====================================================================== */
-typedef struct { int id; const char* msg; u8 yn; } AE;
-
-static const AE _atbl[] = {
-    /* info-only (yn=0) */
-    {1100,"Start a new game? (Current game will be lost)",1},
-    {1200,"You still have skill points to spend.",0},
-    {1300,"Nothing available here.",0},
-    {1400,"You can't afford that.",0},
-    {1500,"No empty cargo bays.",0},
-    {1600,"Nothing for sale here.",0},
-    {1700,"They're not interested.",0},
-    {1800,"Too many crew members.",0},
-    {1900,"You can't buy that ship.",0},
-    {2000,"That ship is not available here.",0},
-    {2100,"You can't buy that item.",0},
-    {2200,"Not enough equipment slots.",0},
-    {2300,"No more of that item.",0},
-    {2400,"That item is not sold here.",0},
-    {2500,"Cargo bays are full.",0},
-    {2600,"No free crew quarters.",0},
-    {2700,"Not enough funds for this event.",0},
-    {2800,"You must pay your mercenaries first.",0},
-    {2900,"Tribbles ate your food!",0},
-    {3000,"You have a tribble on board!",0},
-    {3100,"You beamed over the tribbles.",0},
-    {3200,"Your skill increased!",0},
-    {3300,"Your police record is clean.",0},
-    {3400,"You're in debt!",0},
-    {3500,"Your debt is too high for a new loan.",0},
-    {3600,"You have no debt.",0},
-    {3700,"An uneventful trip.",0},
-    {3800,"You have arrived safely.",0},
-    {3900,"No illegal goods found — clean bill.",0},
-    {4000,"The police cannot be bribed here.",0},
-    {4100,"Not enough credits for the bribe.",0},
-    {4200,"Pirates plunder your cargo!",0},
-    {4300,"Pirates find no cargo. They demand a cash blackmail.",0},
-    {4400,"Both ships are destroyed!",0},
-    {4500,"Your opponent is destroyed!",0},
-    {4600,"Your ship has been destroyed!",0},
-    {4700,"You escaped!",0},
-    {4800,"Your opponent escaped!",0},
-    {5000,"Not enough cargo bays for that.",0},
-    {5100,"You found an antidote!",0},
-    {5200,"Lightning shield activated!",0},
-    {5300,"Sealed cannisters protect your cargo.",0},
-    {5400,"The victim doesn't have any of that.",0},
-    {5500,"You escaped, but with damage.",0},
-    {5600,"You can't afford a full fuel load.",0},
-    {5700,"You can't afford full repairs.",0},
-    {5800,"You can't afford full fuel or repairs.",0},
-    {6200,"You have no weapons!",0},
-    {6400,"Escape pod activated — you survive!",0},
-    {6500,"A Flea was built for you.",0},
-    {6600,"Insurance pays for your new ship.",0},
-    {6700,"A tribble survived in the escape pod.",0},
-    {6800,"The antidote was destroyed.",0},
-    {6900,"You need an escape pod to get insurance.",0},
-    {7200,"Outdated software — update needed.",0},
-    {7300,"No room to scoop fuel. Let it go?",1},
-    {7900,"Squeek!",0},
-    {8000,"Tribbles ate your narcotics!",0},
-    {8100,"You bought a moon! Congratulations!",0},
-    {8200,"The aliens stole the artifact.",0},
-    {8300,"Artifact not saved.",0},
-    {8400,"Your ship is not worth much.",0},
-    {8700,"Surrender not accepted.",0},
-    {8900,"You have been arrested!",0},
-    {9000,"Antidote removed.",0},
-    {9200,"Flea received.",0},
-    {9300,"You were impounded.",0},
-    {9400,"Insurance lost.",0},
-    {9600,"You retired.",0},
-    {9800,"Morgan Laser installed.",0},
-    {9900,"Reactor installed.",0},
-    {10000,"Reactor delivered.",0},
-    {10100,"Reactor destroyed.",0},
-    {10300,"Training completed!",0},
-    {10400,"Fuel compactor transferred.",0},
-    {10500,"Lightning shield transferred.",0},
-    {10600,"Transfer Fuel Compactor to new ship? (+20000 cr)",1},
-    {10700,"Transfer Lightning Shield to new ship? (+30000 cr)",1},
-    {11100,"Orbit trade completed.",0},
-    {11200,"The Customs Police cannot be bribed.",0},
-    {12000,"The Experiment has been performed!",0},
-    {12200,"That was a good drink!",0},
-    {12300,"That was a strange drink...",0},
-    {12400,"Loan amount received.",0},
-    {12700,"Debug message.",0},
-    {12800,"Nothing to dump.",0},
-    {12900,"Jonathan Wild has been arrested!",0},
-    {13000,"You got a Morgan Laser!",0},
-    {13100,"Transfer Morgan Laser to new ship? (+33333 cr)",1},
-    {13200,"Wild boarded the pirate ship.",0},
-    {13300,"Wild stays aboard — no room on pirate ship.",0},
-    {13500,"Wild has left your ship.",0},
-    {13600,"The reactor is consuming fuel cells.",0},
-    {13700,"Reactor meltdown! Your ship is destroyed.",0},
-    {13800,"Warning: reactor condition deteriorating.",0},
-    {13900,"The reactor is making unusual noises.",0},
-    {14000,"The reactor is smoking!",0},
-    {14100,"The reactor has been destroyed.",0},
-    {14200,"Pirates are puzzled by the reactor.",0},
-    {14300,"Police confiscate the reactor.",0},
-    {14400,"Wild won't get aboard.",0},
-    {14500,"Can't transfer — slot occupied.",0},
-    {14700,"Can't transfer that item.",0},
-    {14800,"Tribbles on board!",0},
-    {14900,"Can't sell ship with reactor on board.",0},
-    {15000,"Tribbles irradiated.",0},
-    {15100,"All tribbles irradiated.",0},
-    {15200,"Wild is afraid of the reactor!",0},
-    {15300,"Wild won't stay on board with the reactor. Say goodbye?",1},
-    {15600,"You yield the narcotics.",0},
-    {15700,"Hull upgrade installed!",0},
-    {15800,"No system selected.",0},
-    {16000,"Can't dump and can't scoop.",0},
-    {16100,"General message.",0},
-    {16200,"Cannot save game.",0},
-    {16300,"Cannot load game.",0},
-    {16600,"Game saved.",0},
-    {16900,"Cannot switch games.",0},
-    {17000,"Game switched.",0},
-    {17500,"Can't jump to current system.",0},
-    /* yes/no (yn=1, return 0=affirmative matches Palm) */
-    {4900, "Retire and end your career?",1},
-    {6000, "Clear the high score table?",1},
-    {6300, "Buy an escape pod?",1},
-    {7000, "Stop your insurance? Your no-claim will reset to 0%%.",1},
-    {7400, "Sell this item?",1},
-    {7500, "You aren't carrying illegal goods. Are you sure you want to flee or bribe?",1},
-    {7600, "Submit to inspection?",1},
-    {8500, "If you attack the police, you will be labeled a criminal. Are you sure?",1},
-    {8600, "Attacking a trader will make the police suspicious. Continue?",1},
-    {8800, "Do you really want to surrender?",1},
-    {9700, "The aliens only want the artifact. Surrender it?",1},
-    {10800,"Fire this crew member?",1},
-    {11000,"Flee the Customs Police? Your record will suffer.",1},
-    {11300,"Attack this famous captain?",1},
-    {11400,"Engage the Marie Celeste and take its cargo?",1},
-    {11500,"Trade your shield with Captain Ahab?",1},
-    {11700,"Trade your laser with Captain Conrad?",1},
-    {11800,"Trade your laser with Captain Huie?",1},
-    {11900,"Drink the bottle?",1},
-    {12500,"Buy a newspaper?",1},
-    {13400,"Wild won't go to a system with police. Say goodbye to Wild?",1},
-    {14600,"Trade in your ship?",1},
-    {15400,"Track this system on the galactic chart?",1},
-    {15500,"Dump all cargo?",1},
-    {15900,"Use the Singularity Device?",1},
-    {16400,"Really load this save? Unsaved progress will be lost.",1},
-    {16500,"Disable scoring for this game?",1},
-    {16700,"This might affect your record. Continue?",1},
-    {16800,"Switch to another game?",1},
-    {6000,"Clear high scores?",1},
-    {7000,"Stop insurance?",1},
-    {7400,"Sell this item?",1},
-    {9700,"Surrender to aliens?",1},
-    {17300,"Enable rectangular buttons?",1},
-    {4900,"Retire from the game?",1},
-    {6100,"You found an Easter egg!",0},
-    {6300,"Buy an escape pod?",1},
-    {7100,"Cannot afford insurance premium.",0},
-    {7500,"Still want to flee/bribe? (No=cancel)",1},
-    {7800,"Cannot afford the wormhole toll.",0},
-    {8500,"Attack by accident! Continue attack?",1},
-    {8600,"Attack this trader?",1},
-    {9100,"Tribbles sold!",0},
-    {9500,"Your mercenaries have left.",0},
-    {10200,"You received a fuel compactor!",0},
-    {10900,"You fly through a fabric rip!",0},
-    {11600,"Training completed! Skill increased.",0},
-    {17100,"Switching to a new game.",0},
-    {17400,"Enable rectangular buttons?",0},
-    {5900,"You can't buy a ship while carrying equipment.",0},
-    {7600,"Sure you want to submit? (No=keep fighting)",1},
-    {7700,"Wormhole out of range from here.",0},
-    {8800,"Surrender to this opponent?",1},
-    {12600,"Cannot afford the newspaper.",0},
-    {0,NULL,0}
-};
-
-static const AE* _find_alert(int id)
+__attribute__((used)) void sram_copy_slot(int from, int to)
 {
-    const AE* a;
-    for (a = _atbl; a->id; a++)
-        if (a->id == id) return a;
-    return NULL;
+    u32 i;
+    SRAM_enable();
+    for (i = 0; i < SRAM_DATA_OFF + sizeof(SAVEGAMETYPE); i++)
+        SRAM_writeByte(to * SRAM_SLOT_SIZE + i, SRAM_readByte(from * SRAM_SLOT_SIZE + i));
+    SRAM_disable();
 }
 
-int ui_alert_id(int alertID)
+__attribute__((used)) void sram_clear_slot(int slot)
 {
-    const AE* a = _find_alert(alertID);
-    if (a && a->yn) return ui_confirm(a->msg) ? 0 : 1;
-    ui_alert(a ? a->msg : "OK");
-    return 0;
-}
-
-int ui_custom_alert(int alertID, const char* s1, const char* s2, const char* s3)
-{
-    char body[160];
-    const AE* a = _find_alert(alertID);
-    int yn = a ? a->yn : 0;
-    (void)s3;
-    snprintf(body, sizeof(body), "%s", a ? a->msg : "Notice");
-    if (s1 && s1[0] && s1[0] != ' ')
-        snprintf(body + strlen(body), sizeof(body) - strlen(body), "\n%s", s1);
-    if (s2 && s2[0] && s2[0] != ' ')
-        snprintf(body + strlen(body), sizeof(body) - strlen(body), "\n%s", s2);
-    if (yn) return ui_confirm(body) ? 0 : 1;
-    ui_alert(body);
-    return 0;
+    u16 zero = 0;
+    SRAM_enable();
+    SRAM_writeBuffer(&zero, slot * SRAM_SLOT_SIZE + SRAM_MAGIC_OFF, sizeof(zero));
+    SRAM_disable();
 }
 
 /* =========================================================================
@@ -544,6 +308,13 @@ __attribute__((used)) Boolean GEN_FrmDispatchEvent(EventType* ep)
 #define MAX_LABELS 64
 static struct { int id; char text[64]; } _lbl[MAX_LABELS];
 static int _lbl_n;
+void ui_labels_clear(void) { _lbl_n = 0; }
+const char* ui_label(int id)
+{
+    int i;
+    for (i = 0; i < _lbl_n; i++) if (_lbl[i].id == id) return _lbl[i].text;
+    return "";
+}
 
 static char* _lbl_slot(int id)
 {
@@ -607,41 +378,64 @@ __attribute__((used)) const char* GEN_CtlGetLabel(void* cp)
  * The chosen value is written into ui_field_buf AND SBuf so callers
  * that use GetField() or SBuf directly both get it.
  * ====================================================================== */
+#define QTY_NONE (-1)
+#define QTY_ALL  (-2)
 static int _qty_dialog(const char* title, int max_qty)
 {
-    int qty = 0;
+    int qty = 0, hold = 0;
     char ctx[192];
     u8  qty_row;
+    const char* p;
 
     _lbl_body(ctx, sizeof(ctx));
+    /* the original label tells the maximum: "...up to N..." / "...afford N." */
+    for (p = ctx; *p; p++) {
+        const char* q = NULL;
+        if (!strncmp(p, "up to ", 6)) q = p + 6;
+        else if (!strncmp(p, "afford ", 7)) q = p + 7;
+        if (q && *q >= '0' && *q <= '9') {
+            int v = 0;
+            while (*q >= '0' && *q <= '9') v = v * 10 + (*q++ - '0');
+            if (v < max_qty) max_qty = v;
+            break;
+        }
+    }
 
+    gfx_hide();
     ui_clear_body();
     ui_hline(UI_BODY_TOP);
     ui_print(1, UI_BODY_TOP + 1, PAL_HILIGHT, title);
     ui_hline(UI_BODY_TOP + 2);
-    qty_row = _wrap(ctx, UI_BODY_TOP + 3, PAL_NORMAL);
-    if (qty_row < (u8)(UI_BODY_BOT - 3)) qty_row = (u8)(UI_BODY_BOT - 3);
+    if (ctx[0] == '\0') ctx[0] = ' ';
+    qty_row = ui_wrap(ctx, UI_BODY_TOP + 3, PAL_NORMAL);
+    qty_row = (u8)(qty_row + 1);
 
-    ui_printf(1, qty_row, PAL_HILIGHT, "Amount: %-6d  max %d", qty, max_qty);
-    ui_status("L/R=adjust  Up=max  Dn=0  A=OK  B=cancel");
-
+    ui_status("L/R=1 U/D=10  A=OK  B=None  C=All");
     for (;;) {
-        int ch = 0;
-        ui_vsync();
-        if (ui_joy_pressed & BTN_RIGHT) { if (qty < max_qty) { qty++; ch=1; } }
-        if (ui_joy_pressed & BTN_LEFT)  { if (qty > 0)       { qty--; ch=1; } }
-        if (ui_joy_pressed & BTN_UP)    { qty = max_qty; ch=1; }
-        if (ui_joy_pressed & BTN_DOWN)  { qty = 0;       ch=1; }
-        if (ch) ui_printf(1, qty_row, PAL_HILIGHT, "Amount: %-6d  max %d", qty, max_qty);
-        if (ui_joy_pressed & BTN_A) {
-            snprintf(ui_field_buf, sizeof(ui_field_buf), "%d", qty);
-            snprintf(SBuf, 8, "%d", qty);
-            return qty;
-        }
-        if (ui_joy_pressed & BTN_B) {
-            ui_field_buf[0] = '\0'; SBuf[0] = '\0';
-            return -1;
-        }
+        int ch = 0, step = 0;
+        ui_printf(1, qty_row, PAL_HILIGHT, "Amount: %-6d", qty);
+        do {
+            ui_vsync();
+            if (ui_joy_held & (BTN_LEFT | BTN_RIGHT | BTN_UP | BTN_DOWN)) hold++; else hold = 0;
+            if ((ui_joy_pressed & (BTN_LEFT | BTN_RIGHT | BTN_UP | BTN_DOWN)) ||
+                (hold > 20 && !(hold & 3))) {
+                step = (ui_joy_held & (BTN_UP | BTN_DOWN)) ? 10 : 1;
+                if (hold > 90)  step *= 10;
+                if (hold > 180) step *= 10;
+                if (ui_joy_held & (BTN_LEFT | BTN_DOWN)) step = -step;
+                qty += step;
+                if (qty > max_qty) qty = max_qty;
+                if (qty < 0) qty = 0;
+                ch = 1;
+            }
+            if (ui_joy_pressed & (BTN_A | BTN_START)) {
+                snprintf(ui_field_buf, sizeof(ui_field_buf), "%d", qty);
+                snprintf(SBuf, 8, "%d", qty);
+                return qty;
+            }
+            if (ui_joy_pressed & BTN_B) { ui_field_buf[0] = '\0'; SBuf[0] = '\0'; return QTY_NONE; }
+            if (ui_joy_pressed & BTN_C) { ui_field_buf[0] = '\0'; SBuf[0] = '\0'; return QTY_ALL; }
+        } while (!ch);
     }
 }
 
@@ -664,54 +458,32 @@ __attribute__((used)) u16 GEN_FrmDoDialog(FormPtr frm)
     switch (formID) {
 
     /* ── Cargo quantity spinners ───────────────────────────────────────── */
-    case AmountToSellForm:
-        result = _qty_dialog("Sell: How Many?", 9999);
-        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
-        return (u16)(result < 0 ? AmountToSellNoneButton : AmountToSellOKButton);
+#define QTY_FORM(F, TITLE, MAX, OKB, ALLB, NONEB) \
+    case F: \
+        result = _qty_dialog(TITLE, MAX); \
+        return (u16)(result == QTY_NONE ? NONEB : result == QTY_ALL ? ALLB : OKB);
 
-    case AmountToBuyForm:
-        result = _qty_dialog("Buy: How Many?", 9999);
-        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
-        return (u16)(result < 0 ? AmountToBuyNoneButton : AmountToBuyOKButton);
+    QTY_FORM(AmountToSellForm, ui_form_title,          999,   AmountToSellOKButton, AmountToSellAllButton, AmountToSellNoneButton)
+    QTY_FORM(AmountToBuyForm, ui_form_title, 999, AmountToBuyOKButton, AmountToBuyAllButton, AmountToBuyNoneButton)
+    QTY_FORM(AmountToPlunderForm, ui_form_title, 999, AmountToPlunderOKButton, AmountToPlunderAllButton, AmountToPlunderNoneButton)
+    QTY_FORM(GetLoanForm,         "How much do you want to borrow?", 25000, GetLoanOKButton, GetLoanEverythingButton, GetLoanNothingButton)
+    QTY_FORM(PayBackForm,         "How much do you want to pay back?", 30000, PayBackOKButton, PayBackEverythingButton, PayBackNothingButton)
+    QTY_FORM(BuyFuelForm,         "How much do you want to spend maximally on fuel?", 999, BuyFuelOKButton, BuyFuelAllButton, BuyFuelNoneButton)
+    QTY_FORM(BuyRepairsForm,      "How much do you want to spend maximally on repairs?", 9999, BuyRepairsOKButton, BuyRepairsAllButton, BuyRepairsNoneButton)
+    QTY_FORM(TradeInOrbitForm,    "Trade in orbit: how many?", 999, TradeInOrbitOKButton, TradeInOrbitAllButton, TradeInOrbitNoneButton)
 
-    case AmountToPlunderForm:
-        result = _qty_dialog("Plunder: How Many?", 9999);
-        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
-        return (u16)(result < 0 ? AmountToPlunderNoneButton : AmountToPlunderOKButton);
-
-    case GetLoanForm:
-        result = _qty_dialog("Get Loan", 25000);
-        if (result < 0)      return GetLoanNothingButton;
-        if (result >= 25000) return GetLoanEverythingButton;
-        return GetLoanOKButton;
-
-    case PayBackForm:
-        result = _qty_dialog("Pay Back Loan", 99999);
-        if (result < 0)      return PayBackNothingButton;
-        if (result >= 99999) return PayBackEverythingButton;
-        return PayBackOKButton;
-
-    /* ── Fuel & repair spinners ────────────────────────────────────────── */
-    case BuyFuelForm:
-        result = _qty_dialog("Buy Fuel", 99);
-        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
-        if (result < 0)    return BuyFuelNoneButton;
-        if (result >= 99)  return BuyFuelAllButton;
-        return BuyFuelOKButton;
-
-    case BuyRepairsForm:
-        result = _qty_dialog("Buy Repairs", 9999);
-        snprintf(SBuf, 8, "%d", result < 0 ? 0 : result);
-        if (result < 0)    return BuyRepairsNoneButton;
-        if (result >= 9999) return BuyRepairsAllButton;
-        return BuyRepairsOKButton;
-
-    /* ── Trade in orbit ────────────────────────────────────────────────── */
-    case TradeInOrbitForm:
-        result = _qty_dialog("Trade in Orbit", 9999);
-        if (result < 0)     return (u16)(formID + 2);
-        if (result >= 9999) return TradeInOrbitAllButton;
-        return TradeInOrbitOKButton;
+    case SpecificationForm: {
+        char t[200];
+        snprintf(t, sizeof(t), "Mercenaries:   %s\nInsurance:     %s\nInterest:      %s\nWormhole tax:  %s\n\nTotal:         %s",
+                 ui_label(SpecificationMercenariesLabel), ui_label(SpecificationInsuranceLabel),
+                 ui_label(SpecificationInterestLabel), ui_label(SpecificationWormholeTaxLabel),
+                 ui_label(SpecificationTotalLabel));
+        {
+            static const char* const ok[] = { "OK" };
+            ui_alert_buttons("Cost Specification", t, ok, 1, 0, 0);
+        }
+        return (u16)(formID + 1);
+    }
 
     /* ── Bribe ─────────────────────────────────────────────────────────── */
     case BribeForm:
@@ -764,119 +536,91 @@ __attribute__((used)) u16 GEN_FrmDoDialog(FormPtr frm)
 
     /* ── Dump cargo (inline discard screen) ───────────────────────────── */
     case DumpCargoForm: {
-        /* Run a self-contained dump screen.
-         * Game code already called FrmSetEventHandler(frm, DiscardCargoFormHandleEvent)
-         * before FrmDoDialog, so the handler is registered in _hndl[]. */
+        /* Jettison cargo (opened from the Plunder screen). The game already
+         * registered DiscardCargoFormHandleEvent for this form. */
         EventType ev;
-        int saved_form = ui_current_form;
+        int saved_form = ui_current_form, sel = 0, i, redraw = 1;
         ui_current_form = DumpCargoForm;
-
-        /* Deliver open */
         memset(&ev, 0, sizeof(ev));
         ev.eType = frmOpenEvent;
         ev.data.frmOpen.formID = DumpCargoForm;
         GEN_FrmDispatchEvent(&ev);
-
-        /* Input loop: B=done, everything else → dispatch as ctlSelect */
-        ui_clear_body();
-        ui_title("DUMP CARGO");
-        {
-            int i;
-            for (i = 0; i < MAXTRADEITEM; i++) {
-                if (Ship.Cargo[i] > 0)
-                    ui_printf(0, UI_BODY_TOP + i, PAL_NORMAL,
-                        "%-12s  x%d", Tradeitem[i].Name, Ship.Cargo[i]);
-                else
-                    ui_printf(0, UI_BODY_TOP + i, PAL_DIM,
-                        "%-12s  ---", Tradeitem[i].Name);
+        gfx_hide();
+        for (;;) {
+            if (redraw) {
+                ui_clear_body();
+                ui_title("DUMP CARGO");
+                for (i = 0; i < MAXTRADEITEM; i++)
+                    ui_printf(0, UI_BODY_TOP + 1 + i,
+                              i == sel ? PAL_HILIGHT : (Ship.Cargo[i] > 0 ? PAL_NORMAL : PAL_DIM),
+                              "%s %-12s %3d", i == sel ? ">" : " ", Tradeitem[i].Name, (int)Ship.Cargo[i]);
+                ui_printf(0, UI_BODY_TOP + MAXTRADEITEM + 3, PAL_NORMAL, "Bays: %d/%d",
+                          FilledCargoBays(), TotalCargoBays());
+                ui_status("A=Qty  C=All  B=Done");
+                redraw = 0;
             }
-        }
-        ui_status("UP/DN=item  A=dump all  B=done");
-        {
-            int sel = 0;
-            for (;;) {
-                ui_vsync();
-                if (ui_joy_pressed & BTN_DOWN) {
-                    if (sel < MAXTRADEITEM-1) sel++;
-                    ui_printf(0, UI_BODY_TOP + sel, PAL_HILIGHT,
-                        "%-12s  x%d  <", Tradeitem[sel].Name, Ship.Cargo[sel]);
-                }
-                if (ui_joy_pressed & BTN_UP) {
-                    if (sel > 0) sel--;
-                    ui_printf(0, UI_BODY_TOP + sel, PAL_HILIGHT,
-                        "%-12s  x%d  <", Tradeitem[sel].Name, Ship.Cargo[sel]);
-                }
-                if (ui_joy_pressed & BTN_A) {
-                    memset(&ev, 0, sizeof(ev));
-                    ev.eType = ctlSelectEvent;
-                    ev.data.ctlSelect.controlID = (u16)(SellCargoDump0Button + sel);
-                    GEN_FrmDispatchEvent(&ev);
-                    /* Redraw after dump */
-                    {
-                        int i;
-                        for (i = 0; i < MAXTRADEITEM; i++) {
-                            int p = (i == sel) ? PAL_HILIGHT : (Ship.Cargo[i] > 0 ? PAL_NORMAL : PAL_DIM);
-                            if (Ship.Cargo[i] > 0)
-                                ui_printf(0, UI_BODY_TOP + i, p,
-                                    "%-12s  x%d  ", Tradeitem[i].Name, Ship.Cargo[i]);
-                            else
-                                ui_printf(0, UI_BODY_TOP + i, PAL_DIM,
-                                    "%-12s  ---  ", Tradeitem[i].Name);
-                        }
-                    }
-                }
-                if (ui_joy_pressed & BTN_B) break;
+            ui_vsync();
+            if (ui_joy_pressed & BTN_DOWN) { sel = (sel + 1) % MAXTRADEITEM; redraw = 1; }
+            if (ui_joy_pressed & BTN_UP)   { sel = (sel + MAXTRADEITEM - 1) % MAXTRADEITEM; redraw = 1; }
+            if (ui_joy_pressed & (BTN_A | BTN_C)) {
+                memset(&ev, 0, sizeof(ev));
+                ev.eType = ctlSelectEvent;
+                ev.data.ctlSelect.controlID =
+                    (u16)(((ui_joy_pressed & BTN_A) ? DumpCargoQty0Button : DumpCargoAll0Button) + sel);
+                GEN_FrmDispatchEvent(&ev);
+                ui_current_form = DumpCargoForm;
+                redraw = 1;
             }
+            if (ui_joy_pressed & (BTN_B | BTN_START)) break;
         }
         ui_current_form = saved_form;
-        return (u16)(DumpCargoForm + 1);
+        return (u16)DumpCargoDoneButton;
     }
 
     /* ── Find system by name ───────────────────────────────────────────── */
     case FindSystemForm: {
-        int sel = 0, top = 0, vis = 10, n = MAXSOLARSYSTEM, i;
+        /* The Palm form had a text field (system name, or a cheat code) and
+         * a "Track system" checkbox. Pick from the list, or press C to type. */
+        int sel = 0, top = 0, vis = 20, n = MAXSOLARSYSTEM, i, redraw = 1;
 
-        ui_clear_body();
-        ui_title("FIND SYSTEM");
-        ui_status("UP/DN=scroll  A=select  B=cancel");
-
-        /* Initial draw */
-        for (i = 0; i < vis && i < n; i++) {
-            int pal = (i == sel) ? PAL_HILIGHT : PAL_NORMAL;
-            ui_printf(0, UI_BODY_TOP + i, pal, "%-20s",
-                SolarSystemName[SolarSystem[i].NameIndex]);
-        }
-
+        gfx_hide();
         for (;;) {
+            if (redraw) {
+                ui_clear_body();
+                ui_title("FIND SYSTEM");
+                for (i = 0; i < vis && (top + i) < n; i++)
+                    ui_printf(1, UI_BODY_TOP + i, (top + i == sel) ? PAL_HILIGHT : PAL_NORMAL,
+                              "%s%s", (top + i == sel) ? "> " : "  ",
+                              SolarSystemName[SolarSystem[top + i].NameIndex]);
+                ui_status("A=Find START=Find+track C=Type B=Cancel");
+                redraw = 0;
+            }
             ui_vsync();
-            if (ui_joy_pressed & BTN_DOWN && sel < n-1) {
-                sel++;
-                if (sel >= top + vis) top++;
-                for (i = 0; i < vis && (top+i) < n; i++) {
-                    int pal = (top+i == sel) ? PAL_HILIGHT : PAL_NORMAL;
-                    ui_printf(0, UI_BODY_TOP + i, pal, "%-20s",
-                        SolarSystemName[SolarSystem[top+i].NameIndex]);
-                }
-            }
-            if (ui_joy_pressed & BTN_UP && sel > 0) {
-                sel--;
-                if (sel < top) top--;
-                for (i = 0; i < vis && (top+i) < n; i++) {
-                    int pal = (top+i == sel) ? PAL_HILIGHT : PAL_NORMAL;
-                    ui_printf(0, UI_BODY_TOP + i, pal, "%-20s",
-                        SolarSystemName[SolarSystem[top+i].NameIndex]);
-                }
-            }
-            if (ui_joy_pressed & BTN_A) {
-                strncpy(FindSystem,
-                    SolarSystemName[SolarSystem[sel].NameIndex], NAMELEN);
-                FindSystem[NAMELEN] = '\0';
-                strncpy(SBuf, FindSystem, 7); SBuf[7] = '\0';
-                strncpy(ui_field_buf, FindSystem, sizeof(ui_field_buf)-1);
+            if ((ui_joy_pressed & BTN_DOWN) && sel < n - 1) { sel++; redraw = 1; }
+            if ((ui_joy_pressed & BTN_UP) && sel > 0)       { sel--; redraw = 1; }
+            if (ui_joy_pressed & BTN_RIGHT) { sel += vis; if (sel > n - 1) sel = n - 1; redraw = 1; }
+            if (ui_joy_pressed & BTN_LEFT)  { sel -= vis; if (sel < 0) sel = 0; redraw = 1; }
+            if (sel < top) top = sel;
+            if (sel >= top + vis) top = sel - vis + 1;
+            if (ui_joy_pressed & (BTN_A | BTN_START)) {
+                GEN_CtlSetValue(FindSystemTrackCheckbox, (ui_joy_pressed & BTN_START) ? 1 : 0);
+                strncpy(ui_field_buf, SolarSystemName[SolarSystem[sel].NameIndex], sizeof(ui_field_buf) - 1);
+                ui_field_buf[sizeof(ui_field_buf) - 1] = '\0';
                 return FindSystemOKButton;
             }
+            if (ui_joy_pressed & BTN_C) {
+                char t[NAMELEN + 1];
+                t[0] = '\0';
+                if (ui_text_input("FIND SYSTEM", t, NAMELEN) && t[0]) {
+                    GEN_CtlSetValue(FindSystemTrackCheckbox, 0);
+                    strncpy(ui_field_buf, t, sizeof(ui_field_buf) - 1);
+                    ui_field_buf[sizeof(ui_field_buf) - 1] = '\0';
+                    return FindSystemOKButton;
+                }
+                redraw = 1;
+            }
             if (ui_joy_pressed & BTN_B) {
-                ui_field_buf[0] = '\0'; SBuf[0] = '\0';
+                ui_field_buf[0] = '\0';
                 return FindSystemCancelButton;
             }
         }
@@ -885,20 +629,21 @@ __attribute__((used)) u16 GEN_FrmDoDialog(FormPtr frm)
     /* ── Options (gameplay toggles) ────────────────────────────────────── */
     case OptionsForm: {
         static const struct { int id; const char* lbl; } opts[] = {
-            {OptionsAutoFuelCheckbox,            "Auto-fuel"},
-            {OptionsAutoRepairCheckbox,          "Auto-repair"},
-            {OptionsReserveMoneyCheckbox,        "Reserve money"},
-            {OptionsAlwaysInfoCheckbox,          "Always show info"},
-            {OptionsContinuousCheckbox,          "Continuous combat"},
-            {OptionsAttackFleeingCheckbox,       "Attack fleeing"},
-            {OptionsAlwaysIgnorePoliceCheckbox,  "Ignore police"},
-            {OptionsAlwaysIgnorePiratesCheckbox, "Ignore pirates"},
-            {OptionsAlwaysIgnoreTradersCheckbox, "Ignore traders"},
-            {OptionsTradeInOrbitCheckbox,        "Trade in orbit"},
+            {OptionsAutoFuelCheckbox,            "Get full tank on arrival"},
+            {OptionsAutoRepairCheckbox,          "Get full hull repair on arrival"},
+            {OptionsAlwaysIgnoreTradersCheckbox, "Always ignore traders when safe"},
+            {OptionsAlwaysIgnorePoliceCheckbox,  "Always ignore police when safe"},
+            {OptionsAlwaysIgnorePiratesCheckbox, "Always ignore pirates when safe"},
+            {OptionsTradeInOrbitCheckbox,        "Ignore dealing traders"},
+            {OptionsReserveMoneyCheckbox,        "Reserve money for warp costs"},
+            {OptionsAlwaysInfoCheckbox,          "Always go from Chart to Info"},
+            {OptionsContinuousCheckbox,          "Continuous attack and flight"},
+            {OptionsAttackFleeingCheckbox,       "Continue attacking fleeing ship"},
             {0, NULL}
         };
-        int cur = 0, n = 10, i;
+        int cur = 0, n = 11, i, leave = atoi(ui_field_buf);
 
+        gfx_hide();
         #define DRAW_OPTS() do { \
             ui_clear_body(); ui_title("OPTIONS"); \
             for (i = 0; opts[i].id; i++) { \
@@ -906,20 +651,26 @@ __attribute__((used)) u16 GEN_FrmDoDialog(FormPtr frm)
                 int p = (i == cur) ? PAL_HILIGHT : PAL_NORMAL; \
                 ui_printf(0, UI_BODY_TOP+i, p, "[%c] %s", v ? 'X' : ' ', opts[i].lbl); \
             } \
-            ui_status("UP/DN=move  A=toggle  B=done  St=more"); \
+            ui_printf(0, UI_BODY_TOP+11, cur == 10 ? PAL_HILIGHT : PAL_NORMAL, \
+                      "Cargo bays to leave empty: < %d >", leave); \
+            ui_status("UP/DN A=toggle L/R=bays B=done St=more"); \
         } while(0)
 
         DRAW_OPTS();
         for (;;) {
             ui_vsync();
-            if (ui_joy_pressed & BTN_DOWN && cur < n-1) { cur++; DRAW_OPTS(); }
-            if (ui_joy_pressed & BTN_UP   && cur > 0)   { cur--; DRAW_OPTS(); }
-            if (ui_joy_pressed & BTN_A) {
+            if (ui_joy_pressed & BTN_DOWN) { cur = (cur + 1) % n; DRAW_OPTS(); }
+            if (ui_joy_pressed & BTN_UP)   { cur = (cur + n - 1) % n; DRAW_OPTS(); }
+            if ((ui_joy_pressed & BTN_A) && cur < 10) {
                 GEN_CtlSetValue(opts[cur].id, GEN_CtlGetValue(opts[cur].id) ? 0 : 1);
                 DRAW_OPTS();
             }
-            if (ui_joy_pressed & BTN_B)     return OptionsDoneButton;
-            if (ui_joy_pressed & BTN_START) return OptionsOptions2Button;
+            if (cur == 10 && (ui_joy_pressed & BTN_RIGHT) && leave < 99) { leave++; DRAW_OPTS(); }
+            if (cur == 10 && (ui_joy_pressed & BTN_LEFT) && leave > 0)   { leave--; DRAW_OPTS(); }
+            if (ui_joy_pressed & (BTN_B | BTN_START)) {
+                snprintf(ui_field_buf, sizeof(ui_field_buf), "%d", leave);
+                return (u16)((ui_joy_pressed & BTN_B) ? OptionsDoneButton : OptionsOptions2Button);
+            }
         }
         #undef DRAW_OPTS
     }
@@ -927,14 +678,17 @@ __attribute__((used)) u16 GEN_FrmDoDialog(FormPtr frm)
     /* ── Options2 (more toggles) ───────────────────────────────────────── */
     case Options2Form: {
         static const struct { int id; const char* lbl; } opts2[] = {
-            {Options2AutoNewsPayCheckbox,   "Auto-pay newspaper"},
-            {Options2ShowRangeCheckbox,     "Show tracked range"},
-            {Options2TrackAutoOffCheckbox,  "Track auto-off"},
+            {Options2AutoNewsPayCheckbox,   "Always pay for newspaper"},
+            {Options2ShowRangeCheckbox,     "Show range to tracked system"},
+            {Options2TrackAutoOffCheckbox,  "Stop tracking on arrival"},
             {Options2TextualEncountersCheckbox, "Textual encounters"},
             {Options2RemindLoansCheckbox,   "Remind about loans"},
+            {Options2SharePreferencesCheckbox, "Share options when switching"},
+            {Options2IdentifyStartupCheckbox,  "Identify game when switching"},
             {0, NULL}
         };
-        int cur = 0, n = 5, i;
+        int cur = 0, n = 7, i;
+        gfx_hide();
 
         #define DRAW_OPTS2() do { \
             ui_clear_body(); ui_title("OPTIONS 2"); \
@@ -962,13 +716,32 @@ __attribute__((used)) u16 GEN_FrmDoDialog(FormPtr frm)
 
     /* ── Info-only dialogs ─────────────────────────────────────────────── */
     case AboutForm:
-        ui_alert("Space Trader 1.2.0\nGenesis port");
+        gfx_hide();
+        ui_clear_body();
+        ui_title("ABOUT SPACE TRADER");
+        gfx_set_pal(PAL0, gfx_about_pal);
+        gfx_begin(4, 4, 0, 0);
+        gfx_blit(&gfx_about[AB_ICON], 0, 0);
+        gfx_upload(GFX_TILE_BASE + 1100);
+        gfx_place(PAL0, GFX_TILE_BASE + 1100, 2, 3, 4, 4);
+        ui_print(8, 4, PAL_HILIGHT, "Space Trader 1.2.2");
+        ui_print(8, 5, PAL_TITLE, "Sega Genesis / Mega Drive port");
+        ui_print(2, 9, PAL_NORMAL, "Copyright (C) 2000-2002 by");
+        ui_print(2, 10, PAL_NORMAL, "Pieter Spronck");
+        ui_print(2, 12, PAL_NORMAL, "Graphics: Alexander Lawrence");
+        ui_print(2, 14, PAL_DIM, "Press A for the full credits.");
+        ui_status("A = OK");
+        for (;;) {
+            ui_vsync();
+            if (ui_joy_pressed & (BTN_A | BTN_B | BTN_START)) break;
+        }
+        gfx_reset();
+        if (ui_string(15700)) ui_text_viewer("ABOUT SPACE TRADER", ui_string(15700));
         return (u16)(formID + 1);
 
     case ShortcutsForm:
     case CheatForm:
     case RareCheatForm:
-    case SpecificationForm:
     case QuestListForm:
         _lbl_body(body, sizeof(body));
         ui_alert(body[0] ? body : "(no content)");
@@ -1012,16 +785,9 @@ __attribute__((used)) void GEN_LstSetSelection(int id, int v)  { _lsel[(unsigned
  * §14  Win rendering no-ops
  * (Game handlers still call these; we silence them.)
  * ====================================================================== */
-__attribute__((used)) void GEN_WinDrawChars(const char* s, int l, int x, int y)
-    {(void)s;(void)l;(void)x;(void)y;}
-__attribute__((used)) void GEN_WinEraseRectangle(const RectangleType* r, int c)
-    {(void)r;(void)c;}
-__attribute__((used)) void GEN_WinDrawLine(int x1,int y1,int x2,int y2)
-    {(void)x1;(void)y1;(void)x2;(void)y2;}
 __attribute__((used)) void GEN_WinFillRectangle(const RectangleType* r, int c)
     {(void)r;(void)c;}
-__attribute__((used)) void GEN_WinDrawBitmap(BitmapPtr b, int x, int y)
-    {(void)b;(void)x;(void)y;}
+
 
 /* =========================================================================
  * §15  Event queue
@@ -1064,16 +830,14 @@ __attribute__((used)) u32 GEN_TimGetTicks(void) { return ui_frame_count; }
 /* =========================================================================
  * §17  Memory pool
  * ====================================================================== */
-static u8  _pool[8192];
-static u16 _pool_top;
+/* Nothing in the game allocates Palm handles any more (Field.c was
+ * replaced); keep a tiny scratch block so stray callers stay harmless. */
 __attribute__((used)) void* PalmMem_Alloc(u16 size)
 {
-    void* p;
-    size = (u16)((size + 1u) & ~1u);
-    if (_pool_top + size > sizeof(_pool)) { kprintf("PalmMem_Alloc: OOM"); return NULL; }
-    p = &_pool[_pool_top]; _pool_top += size;
-    memset(p, 0, size);
-    return p;
+    static u8 scratch[64];
+    (void)size;
+    memset(scratch, 0, sizeof(scratch));
+    return scratch;
 }
 void PalmMem_Free(void* p) { (void)p; }
 
@@ -1110,9 +874,10 @@ void ui_gen_progress(int step, int total, const char* msg)
 
     if (step == 1) {
         /* First call: draw the full loading screen */
-        VDP_clearPlane(WINDOW, TRUE);
+        gfx_reset();
+        ui_clear_screen();
         VDP_setTextPalette(2);  /* PAL2 = cyan = PAL_TITLE */
-        VDP_drawText("  SPACE TRADER 1.2.0", 0, 4);
+        VDP_drawText("  SPACE TRADER 1.2.2", 0, 4);
         VDP_setTextPalette(0);
         VDP_drawText("  Sega Genesis Port", 0, 5);
         VDP_drawText("  Starting new game...", 0, 7);

@@ -307,6 +307,12 @@ Boolean DisplayHeadline(char *text, int *y_coord)
 // *****************************************************************
 void DisplayPage(char *text, int start_y)
 {
+#ifdef SGDK_GCC
+	extern void ui_page_add(const char* text);
+	(void)start_y;
+	ui_page_add(text);
+	return;
+#else
 	int offset=0;
 	int internalOffset = 0;
 	int vert = start_y;
@@ -354,6 +360,7 @@ void DisplayPage(char *text, int start_y)
 			theText[45]='\0';
 		}
 	}
+#endif
 }
 
 

@@ -30,8 +30,7 @@ void* memmove(void* dst, const void* src, u32 n)
  * --------------------------------------------------------------------- */
 #define SNPRINTF_TMPSIZE 512
 
-/* Forward-declare vsprintf with SGDK's exact signature so LTO is happy */
-extern u16 vsprintf(char* buf, const char* fmt, va_list ap);
+/* vsprintf comes from SGDK's string.h (u16 in SGDK 1.70, int in 2.x). */
 
 u16 vsnprintf(char* buf, u32 n, const char* fmt, va_list ap)
 {
